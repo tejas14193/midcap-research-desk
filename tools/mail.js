@@ -34,5 +34,6 @@ function send({ subject, text, host = process.env.SMTP_HOST || "smtp.gmail.com",
   });
 }
 module.exports = { send };
-if (require.main === module) send({ subject: process.argv[2] || "Midcap desk test email", text: process.argv[3] || "This is a test email from the Midcap Research Desk on GitHub." })
+if (require.main === module) send({ subject: process.argv[2] || "Midcap desk: test email",
+  text: process.argv[3] || "Email alerts from the Midcap Research Desk are working.\n\nYou will get an email like this when a company reports a new result, or when a signal moves into or out of BUY, STRONG BUY or SELL.\n\nRule-based research signal, not investment advice." })
   .then(() => console.log("Email sent"), e => { console.error("Email failed: " + e.message); process.exit(1) });

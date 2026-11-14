@@ -62,7 +62,7 @@ jobs:
         env:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-        run: node tools/mail.js "Midcap desk: test email" "Email alerts from the Midcap Research Desk are working. You will get an email like this when a company reports a new result, or when a signal moves into or out of BUY, STRONG BUY or SELL."
+        run: node tools/mail.js
 
       - name: Update data and send alerts
         if: steps.mode.outputs.mode != 'deploy-only' && steps.mode.outputs.mode != 'test-email'
