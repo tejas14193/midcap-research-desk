@@ -71,6 +71,7 @@ input,select{font:400 15px var(--body);color:var(--ink);background:var(--surface
 .inline{flex-direction:row;align-items:center;gap:6px;font-size:14px;color:var(--ink)} .inline input{width:auto}
 details>summary{cursor:pointer;font-weight:600}
 details[open]>summary{margin-bottom:10px}
+.sec>summary{font-weight:600} .sec[open]>summary{margin-bottom:10px}
 .note{background:var(--soft);border-left:4px solid var(--warn);padding:8px 12px;font-size:13px;border-radius:4px}
 a{color:var(--accent)}
 svg text{font:11px var(--mono);fill:var(--muted)}
@@ -80,13 +81,13 @@ svg text{font:11px var(--mono);fill:var(--muted)}
 <div class="wrap">
   <header><h1>Midcap Research Desk</h1><p class="sub" id="status">Loading company data…</p></header>
   <main id="main" class="stack"></main>
-  <p class="note">Signals are rule outputs for research, not investment advice. Figures come from Screener.in, a secondary source, and are not checked against exchange filings. Nothing here places trades.</p>
+  <p class="note">Signals are rule outputs for research, not investment advice. Figures come from Screener.in, a secondary source, with new results read from NSE filings where possible. Nothing here places trades.</p>
 </div>
 <script src="engine.js"></script>
 <script>
 "use strict";
 const {RULES,LABEL,analyse,resultImpact}=Engine;
-let DATA=null,PX=null,view="home",sel=null,query="",filter="all";
+let DATA=null,PX=null,view="home",sel=null,query="",filter="all";const secOpen=new Set(),secN={};
 const PREF_KEY="midcap-desk-prefs-v1";let prefs={watch:[],held:[],pe:{}};
 try{const r=localStorage.getItem(PREF_KEY);if(r)prefs=Object.assign(prefs,JSON.parse(r))}catch(e){}
 const savePrefs=()=>{try{localStorage.setItem(PREF_KEY,JSON.stringify(prefs))}catch(e){}};
@@ -109,6 +110,13 @@ function vHome(){
   const watch=all.filter(c=>prefs.watch.includes(c.id)||prefs.held.includes(c.id));
   const cut=Date.now()-10*864e5,fresh=all.filter(c=>c.resultDate&&new Date(c.resultDate)>=cut).sort((a,b)=>a.resultDate<b.resultDate?1:-1);
   let o='<section class="stack"><h2>Strong buy'+(strong.length?" · top "+strong.length:"")+"</h2>"+(strong.length?strong.map(c=>card(c,an(c).A.mos.toFixed(0)+"% below fair value")).join(""):'<p class="card sub">No company meets every strong-buy rule at current prices.</p>')+"</section>";
+  const secs={};all.forEach(c=>{const A=an(c).A;if(A.newInv==="BUY"||A.newInv==="STRONG BUY")(secs[c.industry||"Other"]=secs[c.industry||"Other"]||[]).push(c)});
+  const names=Object.keys(secs).sort(),none=[...new Set(all.map(c=>c.industry||"Other"))].filter(n=>!secs[n]).sort();
+  o+='<section class="stack"><h2>Buy picks by sector</h2><p class="sub">Up to three per sector: strong buys first, then buys, largest discount to fair value first.</p>'+names.map(n=>{
+    const L=secs[n].sort((a,b)=>(an(b).A.strong-an(a).A.strong)||(an(b).A.mos-an(a).A.mos)),k=L.filter(c=>an(c).A.strong).length,show=Math.min(secN[n]||3,L.length);
+    return '<details class="card sec" data-sec="'+esc(n)+'"'+(secOpen.has(n)?" open":"")+'><summary>'+esc(n)+' <span class="sub">· '+L.length+" buy-rated"+(k?", "+k+" strong":"")+'</span></summary><div class="stack">'+L.slice(0,show).map(c=>card(c,an(c).A.mos.toFixed(0)+"% below fair value")).join("")+
+      (show<L.length?'<div><button data-more="'+esc(n)+'">Show next '+Math.min(3,L.length-show)+" of "+(L.length-show)+" more</button></div>":L.length>3?'<p class="sub">That is every buy-rated company in this sector.</p>':"")+"</div></details>"}).join("")+
+    (names.length?"":'<p class="card sub">No company is rated buy at current prices.</p>')+(none.length?'<p class="sub">No buy-rated company right now in: '+none.map(esc).join(", ")+".</p>":"")+"</section>";
   o+='<section class="stack"><h2>My watchlist</h2>'+(watch.length?watch.map(c=>card(c,prefs.held.includes(c.id)?"held":"")).join(""):'<p class="card sub">Open any company and tap “Add to watchlist”. Its signal and red flags then show here.</p>')+"</section>";
   o+='<section class="stack"><h2>Results in the last 10 days</h2>'+(fresh.length?fresh.slice(0,8).map(c=>{const r=an(c),A=r.A;return '<button class="co card" data-open="'+esc(c.id)+'"><span class="grow"><h3>'+esc(c.name)+'</h3><span class="sub">'+esc(A.latest?A.latest.period:"")+" · "+dt(c.resultDate)+(r.changes[0]?" · "+esc(r.changes[0]):"")+"</span></span>"+(A.cls&&A.cls!=="none"?pill(A.cls):"")+pill(A.headline)+"</button>"}).join("")+(fresh.length>8?'<p class="sub">'+(fresh.length-8)+" more reported in this period. Find them in the list below.</p>":""):'<p class="card sub">No new results in the last 10 days.</p>')+"</section>";
   const q=query.trim().toLowerCase(),F={all:()=>true,strong:A=>A.strong,buy:A=>A.newInv==="BUY"||A.strong,watch:A=>A.newInv==="WATCHLIST",avoid:A=>A.newInv==="AVOID",sell:A=>A.holder==="SELL",flags:A=>A.flags.length>0,gaps:A=>A.blocks.length>0};
@@ -131,6 +139,12 @@ function chart(A){
   s+='<line x1="'+l+'" x2="'+(W-l)+'" y1="'+(H-b)+'" y2="'+(H-b)+'" stroke="var(--line)"/><text x="'+l+'" y="'+(H-5)+'">'+esc(r[0].q.period)+'</text><text x="'+(W-l)+'" y="'+(H-5)+'" text-anchor="end">'+esc(r[r.length-1].q.period)+"</text></svg>";
   return s+'<p class="sub">Bars show revenue (latest ₹'+n0(r[r.length-1].q.revenue)+" cr). Line shows "+(A.fin?"financing":"operating")+" margin (latest "+(r[r.length-1].margin==null?"n/a":r[r.length-1].margin.toFixed(1)+"%")+").</p>";
 }
+const link=(u,t)=>/^https:\/\//.test(u||"")?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+t+"</a>":t;
+function srcNote(q){
+  if(q.src==="NSE")return '<p class="note">These figures were read directly from the '+link(q.filing,"company’s NSE filing")+" of "+dt(q.filed)+". Screener has not loaded this quarter yet, so debt, cash and net worth still come from the last balance sheet on file.</p>";
+  if(q.check&&q.check.length)return '<p class="note">Screener’s figures are used here, but they differ from the '+link(q.filing,"company’s NSE filing")+": "+q.check.map(esc).join("; ")+". A common cause is a different treatment of excise duty or one-off items.</p>";
+  if(q.filing)return '<p class="sub">Checked against the '+link(q.filing,"company’s NSE filing")+" of "+dt(q.filed)+": revenue, operating profit, net profit and interest agree within 2%.</p>";
+  return ""}
 function vCompany(){
   const c=DATA.companies.find(x=>x.id===sel);if(!c)return vHome();
   const r=an(c),A=r.A,M=A.m||{},f=full(c),w=prefs.watch.includes(c.id);
@@ -144,7 +158,7 @@ function vCompany(){
   if(A.risks.length)o+="<div><h3>Risks</h3><ul>"+A.risks.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul></div>";
   o+="<div><h3>What would change this</h3><ul>"+A.change.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul></div>"+
    '<details><summary>Score breakdown</summary><div class="stack" style="gap:6px">'+Object.keys(LABEL).map(k=>{const v=A.scores[k];return '<div class="pillar"><span>'+(A.fin&&k==="strength"?"Asset quality":LABEL[k])+' <span class="sub">'+RULES.weights[k]+'%</span></span><div class="bar"><i style="width:'+(v==null?0:v)+'%"></i></div><span class="num">'+(v==null?"n/a":v.toFixed(0))+"</span></div>"}).join("")+'<p class="sub">Evidence confidence: '+esc(A.confidence)+". A pillar shown as n/a has no data on file and is left out of the score.</p></div></details></section>";
-  if(A.latest){const R=A.row;o+='<section class="card stack"><div class="row"><h2 class="grow">'+esc(A.latest.period)+" result</h2>"+pill(A.cls==="none"?"not classified":A.cls)+'</div><p class="sub">Published about '+dt(c.resultDate)+". Next result expected around "+dt(c.nextDate)+', estimated from last year.</p><div class="kv"><div><b>₹'+n0(A.latest.revenue)+"</b><span>Revenue · YoY "+pc(R.revYoY)+" · QoQ "+pc(R.revQoQ)+"</span></div><div><b>"+(R.margin==null?"–":R.margin.toFixed(1)+"%")+"</b><span>"+(A.fin?"Financing":"Operating")+" margin · "+(R.marginYoY==null?"YoY n/a":(R.marginYoY>=0?"+":"")+R.marginYoY.toFixed(1)+" pts YoY")+"</span></div><div><b>₹"+n0(A.latest.pat)+"</b><span>Net profit · YoY "+pc(R.patYoY)+"</span></div>"+
+  if(A.latest){const R=A.row;o+='<section class="card stack"><div class="row"><h2 class="grow">'+esc(A.latest.period)+" result</h2>"+pill(A.cls==="none"?"not classified":A.cls)+'</div><p class="sub">Published about '+dt(c.resultDate)+(A.latest.src==="NSE"?"":". Next result expected around "+dt(c.nextDate)+", estimated from last year")+".</p>"+srcNote(A.latest)+'<div class="kv"><div><b>₹'+n0(A.latest.revenue)+"</b><span>Revenue · YoY "+pc(R.revYoY)+" · QoQ "+pc(R.revQoQ)+"</span></div><div><b>"+(R.margin==null?"–":R.margin.toFixed(1)+"%")+"</b><span>"+(A.fin?"Financing":"Operating")+" margin · "+(R.marginYoY==null?"YoY n/a":(R.marginYoY>=0?"+":"")+R.marginYoY.toFixed(1)+" pts YoY")+"</span></div><div><b>₹"+n0(A.latest.pat)+"</b><span>Net profit · YoY "+pc(R.patYoY)+"</span></div>"+
      (A.fin?"<div><b>"+(M.gnpa==null?"–":M.gnpa+"%")+"</b><span>Gross NPA</span></div>":"<div><b>₹"+n0(M.netDebt)+"</b><span>"+(A.gross?"Debt":"Net debt")+(A.bs?" at "+esc(A.bs.period):"")+" · "+(M.ndE==null?"n/a":M.ndE.toFixed(1)+"x EBITDA")+"</span></div>")+"</div>"+
      (r.changes.length?"<div><h3>What this result changed</h3><ul>"+r.changes.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul></div>":"")+chart(A)+"</section>"}
   const rows=A.rows.slice(-9).reverse();
@@ -158,7 +172,7 @@ function vCompany(){
   if(A.fv)o+='<div class="kv"><div><b>₹'+n0(A.fv.bear)+"</b><span>Bear · "+A.mult.bear.toFixed(1)+"x</span></div><div><b>₹"+n0(A.fv.base)+"</b><span>Base · "+A.mult.base.toFixed(1)+"x</span></div><div><b>₹"+n0(A.fv.bull)+"</b><span>Bull · "+A.mult.bull.toFixed(1)+"x</span></div><div><b>"+A.pe.toFixed(1)+"x</b><span>Current P/E · upside to base "+pc(A.upside)+"</span></div></div><p class=\"sub\">Fair value = trailing EPS × a P/E multiple. The base multiple is "+esc(A.multSrc)+"; bear and bull are 25% either side. This is a range built on assumptions, not a precise figure.</p>";
   else o+='<p class="sub">'+esc(A.valNote||"No fair-value range is available.")+(A.pe?" Current P/E "+A.pe.toFixed(1)+"x.":"")+"</p>";
   o+='<div class="form"><label>Your bear P/E<input id="pe1" type="number" step="any" value="'+(pe?pe.bear:"")+'"></label><label>Your base P/E<input id="pe2" type="number" step="any" value="'+(pe?pe.base:"")+'"></label><label>Your bull P/E<input id="pe3" type="number" step="any" value="'+(pe?pe.bull:"")+'"></label></div><div class="row"><button data-act="pe">Use my multiples</button>'+(pe?'<button data-act="pe-clear">Back to automatic</button>':"")+'<span class="sub" id="pemsg"></span></div></div></details>';
-  o+='<details class="card"><summary>About this data</summary><div class="stack"><p class="sub">'+esc(c.basis==="consolidated"?"Consolidated":"Standalone")+' figures from <a href="'+esc(c.src)+'">Screener.in</a>, loaded '+dt(c.asof)+". This is a secondary source, rounded to ₹ crore, and is not checked against the exchange filing. Quarters are labelled on the April to March year."+(c.pledge==null?" No promoter pledge is reported on the source page, so governance is not scored.":"")+(A.fin?" Banks, NBFCs and insurers use a simplified model (growth, ROE and gross NPA), so they are never rated strong buy.":"")+"</p></div></details>";
+  o+='<details class="card"><summary>About this data</summary><div class="stack"><p class="sub">'+esc(c.basis==="consolidated"?"Consolidated":"Standalone")+' figures from <a href="'+esc(c.src)+'">Screener.in</a>, loaded '+dt(c.asof)+". This is a secondary source, rounded to ₹ crore. "+(A.fin?"Financial companies are not yet checked against exchange filings.":"The latest quarters are checked against the company’s NSE filing where one can be read, and a new result is read from the filing itself when the company’s previous filing agreed with Screener.")+" Quarters are labelled on the April to March year."+(c.pledge==null?" No promoter pledge is reported on the source page, so governance is not scored.":"")+(A.fin?" Banks, NBFCs and insurers use a simplified model (growth, ROE and gross NPA), so they are never rated strong buy.":"")+"</p></div></details>";
   return o;
 }
 function vRules(){const R=RULES,w=R.weights;return '<div><button data-view="home">← Dashboard</button></div><section class="card stack"><h2>How signals are scored · rules v'+R.version+'</h2><p>Code computes every number and signal from the figures on file. No AI judgement sets a signal.</p>'+
@@ -170,11 +184,12 @@ function vRules(){const R=RULES,w=R.weights;return '<div><button data-view="home
  '<div><h3>Fair value</h3><ul><li>Base fair value = trailing EPS × the stock’s own 5-year median P/E, capped at '+R.maxMult+'x. Bear and bull are 25% below and above.</li><li>No fair value when trailing EPS is negative or no median P/E is on file.</li></ul></div>'+
  '<div><h3>Signals</h3><ul><li><b>STRONG BUY</b>: quality '+R.strongQuality+'+, price at least '+R.strongMos+'% below base fair value, growth score '+R.strongGrowth+'+, latest quarter improving or stable, no red flags, at least '+R.strongQuarters+' quarters on file, and not a financial company. The dashboard shows the 10 with the largest discount.</li><li><b>BUY</b>: quality '+R.buyQuality+'+ and price at least '+R.mos+'% below base fair value.</li><li><b>WATCHLIST</b>: quality '+R.watchQuality+'+ but the price condition is not met.</li><li><b>AVOID</b>: quality below '+R.watchQuality+'.</li><li><b>HOLD / SELL</b> (holders): SELL when quality is below '+R.sellQuality+' or price is more than '+R.overBull+'% above bull fair value; otherwise HOLD.</li><li><b>INSUFFICIENT DATA</b>: fewer than '+R.minQuarters+' quarters, no price, price older than '+R.priceStaleDays+' days, or latest result older than '+R.resultStaleDays+' days.</li></ul></div>'+
  '<div><h3>Red flags</h3><ul><li>Promoter pledge of 10% or more, or up more than 2 points in a year.</li><li>Net debt up more than 20% since the previous balance sheet while above 0.5x EBITDA.</li><li>Operating margin down more than 2 points year on year.</li><li>Net profit down more than 20% year on year, or a net loss.</li><li>Interest cover below 3x. For financials, gross NPA above 5%.</li></ul></div>'+
- '<div><h3>Updates</h3><ul><li>Prices: about every two hours on market days, from Yahoo Finance, and the NSE closing file each evening.</li><li>Results: each evening for companies near their expected result date; every company on Sundays.</li><li>Your watchlist, holdings and own multiples are saved only in this browser.</li></ul></div></section>'}
+ '<div><h3>Updates</h3><ul><li>Prices: twice on market days (about 11:20 and 15:20), from Yahoo or Google Finance, and the NSE closing file each evening.</li><li>Results: NSE filings are checked three times each evening (about 17:10, 19:10 and 21:40). Screener is reloaded each evening for companies near their expected result date, and for every company on Sundays.</li><li>A new result is taken from the NSE filing only for non-financial companies whose previous filing matched Screener within 2%. Otherwise the app waits for Screener.</li><li>Alerts go out for a new result, and when a signal moves into or out of BUY, STRONG BUY or SELL.</li><li>Your watchlist, holdings and own multiples are saved only in this browser.</li></ul></div></section>'}
 function render(){document.getElementById("main").innerHTML=view==="company"?vCompany():view==="rules"?vRules():vHome()}
 function go(v,id){view=v;if(id)sel=id;try{const h=v==="home"?"dashboard":v;if(location.hash!=="#"+h)location.hash=h}catch(e){}render();window.scrollTo(0,0)}
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-open],[data-act]");if(!t)return;
+  const t=e.target.closest("[data-view],[data-open],[data-act],[data-more]");if(!t)return;
+  if(t.dataset.more){const n=t.dataset.more,y=window.scrollY;secN[n]=(secN[n]||3)+3;secOpen.add(n);render();window.scrollTo(0,y);return}
   if(t.dataset.view)return go(t.dataset.view);
   if(t.dataset.open)return go("company",t.dataset.open);
   const a=t.dataset.act;
@@ -190,11 +205,12 @@ document.addEventListener("change",e=>{const t=e.target;
 document.addEventListener("input",e=>{if(e.target.id!=="q")return;query=e.target.value;const q=query.trim().toLowerCase();let n=0;
   document.querySelectorAll("#list>button").forEach(b=>{const c=DATA.companies.find(x=>x.id===b.dataset.open),ok=!q||c.name.toLowerCase().includes(q)||c.id.toLowerCase().includes(q);b.hidden=!ok;if(ok)n++});
   document.getElementById("count").textContent=n+" shown"});
+document.addEventListener("toggle",e=>{const d=e.target;if(d.dataset&&d.dataset.sec)d.open?secOpen.add(d.dataset.sec):secOpen.delete(d.dataset.sec)},true);
 window.addEventListener("hashchange",()=>{const h=location.hash.slice(1),v=h==="rules"?"rules":h==="company"&&sel?"company":"home";if(DATA&&v!==view){view=v;render()}});
 (async()=>{
   const st=document.getElementById("status");
   try{const [d,p]=await Promise.all([fetch("data.json",{cache:"no-store"}).then(r=>r.json()),fetch("prices.json",{cache:"no-store"}).then(r=>r.json())]);DATA=d;PX=p;
-    st.textContent=d.companies.length+" "+d.universe+" companies · prices "+dt(p.date)+(p.time?" "+p.time:"")+" · results checked "+dt(d.built);
+    st.textContent=d.companies.length+" "+d.universe+" companies · prices "+dt(p.date)+(p.time?" "+p.time:"")+" · results checked "+dt(d.filingsChecked||d.built);
     if(location.hash==="#rules")view="rules";render();
   }catch(e){st.textContent="The company data could not be loaded. Close and reopen the page to try again."}
 })();

@@ -4,14 +4,15 @@ name: Midcap desk update
 on:
   schedule:
     - cron: "52 5,9 * * 1-5"   # price check, weekdays 11:22 and 15:22 IST
-    - cron: "8 16 * * *"       # evening research, daily 21:38 IST (full reload on Sundays)
+    - cron: "40 11,13 * * *"   # NSE filings check, daily 17:10 and 19:10 IST
+    - cron: "8 16 * * *"       # evening research, daily 21:38 IST (Screener + NSE; full reload on Sundays)
   workflow_dispatch:
     inputs:
       mode:
         description: "What to run"
         type: choice
         default: research
-        options: [prices, research, full, deploy-only]
+        options: [prices, filings, research, full, deploy-only, test-email]
   push:
     paths: [index.html, engine.js, data.json, prices.json]
 
@@ -42,36 +43,58 @@ jobs:
         id: mode
         run: |
           case "${{ github.event_name }}" in
-            schedule) if [ "${{ github.event.schedule }}" = "8 16 * * *" ]; then m=research; else m=prices; fi ;;
+            schedule)
+              case "${{ github.event.schedule }}" in
+                "8 16 * * *") m=research ;;
+                "40 11,13 * * *") m=filings ;;
+                *) m=prices ;;
+              esac ;;
             workflow_dispatch) m="${{ inputs.mode }}" ;;
             *) m=deploy-only ;;
           esac
           echo "mode=$m" >> "$GITHUB_OUTPUT"
 
+      - name: Test the NSE filing reader
+        run: node tools/test.js
+
+      - name: Send a test email
+        if: steps.mode.outputs.mode == 'test-email'
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: node tools/mail.js "Midcap desk: test email" "Email alerts from the Midcap Research Desk are working. You will get an email like this when a company reports a new result, or when a signal moves into or out of BUY, STRONG BUY or SELL."
+
       - name: Update data and send alerts
-        if: steps.mode.outputs.mode != 'deploy-only'
+        if: steps.mode.outputs.mode != 'deploy-only' && steps.mode.outputs.mode != 'test-email'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: node tools/ci.js "${{ steps.mode.outputs.mode }}" .
 
       - name: Save data to the repository
-        if: steps.mode.outputs.mode != 'deploy-only'
+        if: steps.mode.outputs.mode != 'deploy-only' && steps.mode.outputs.mode != 'test-email'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data.json prices.json state.json
+          [ -f filings.json ] && git add filings.json
           git diff --cached --quiet && exit 0
           git commit -m "Data update (${{ steps.mode.outputs.mode }})"
           git pull --rebase
           git push
 
       - name: Build site folder
+        if: steps.mode.outputs.mode != 'test-email'
         run: mkdir _site && cp index.html engine.js data.json prices.json _site/
       - uses: actions/configure-pages@v5
+        if: steps.mode.outputs.mode != 'test-email'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.mode.outputs.mode != 'test-email'
         with:
           path: _site
       - id: deploy
+        if: steps.mode.outputs.mode != 'test-email'
         uses: actions/deploy-pages@v4

@@ -3,11 +3,13 @@
    All modes work in <dir>, reading and writing data.json (fundamentals), prices.json and state.json (last signals).
    node update.js full <dir>      reload every Nifty Midcap 150 company from Screener, end-of-day prices from NSE
    node update.js research <dir>  evening run: reload companies near their expected result date (everything on Sundays), end-of-day prices
+   node update.js filings <dir>   quick evening run: new results from NSE filings only, end-of-day prices
    node update.js prices <dir>    market-hours run: live prices only, from Yahoo Finance
    Prints a JSON summary on the last line: alerts, newResults, strongBuy, message. */
 "use strict";
 const fs=require("fs"),path=require("path");
 let E;try{E=require("../engine.js")}catch(e){E=require("./engine.js")}
+const N=require("./nse.js");
 const UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
 const SCR="https://www.screener.in";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -90,27 +92,55 @@ async function livePrices(list,old){
 }
 const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){return d}};
 (async()=>{
-  const [mode,dir]=process.argv.slice(2);if(!["full","research","prices"].includes(mode)||!dir){console.error("usage: update.js full|research|prices <dir>");process.exit(2)}
+  const [mode,dir]=process.argv.slice(2);if(!["full","research","filings","prices"].includes(mode)||!dir){console.error("usage: update.js full|research|filings|prices <dir>");process.exit(2)}
   fs.mkdirSync(dir,{recursive:true});const F=n=>path.join(dir,n);
   let bundle=readJ(F("data.json"),null);const state=readJ(F("state.json"),{signals:{}}),oldPx=readJ(F("prices.json"),null);
   const now=new Date(Date.now()+5.5*36e5),today=iso(now),sunday=now.getUTCDay()===0;
   if(mode!=="full"&&!bundle){console.error("data.json is missing in "+dir+". Run full first.");process.exit(2)}
   const failed=[],newResults=[];let checked=[];
-  if(mode!=="prices"){
+  const isFin=c=>c.sector==="fin"||c.industry==="Financial Services",maxIdx=c=>c&&c.quarters.length?Math.max(...c.quarters.map(q=>q.idx)):-1;
+  const old={},oldMax={};(bundle?bundle.companies:[]).forEach(c=>{old[c.id]=c;oldMax[c.id]=maxIdx(c)});
+  /* quarter that has most recently ended */
+  const m=now.getUTCMonth(),y=now.getUTCFullYear(),ended=E.colIdx(["Dec","Mar","Jun","Sep"][Math.floor(m/3)]+" "+(m<3?y-1:y));
+  if(mode==="full"||mode==="research"){
     const list=mode==="full"||sunday||!bundle?await midcapList():bundle.companies.map(c=>({id:c.id,name:c.name,industry:c.industry}));
-    const old={};(bundle?bundle.companies:[]).forEach(c=>old[c.id]=c);
-    /* quarter that has most recently ended */
-    const m=now.getUTCMonth(),y=now.getUTCFullYear(),ended=E.colIdx(["Dec","Mar","Jun","Sep"][Math.floor(m/3)]+" "+(m<3?y-1:y));
-    const due=c=>{if(!c)return true;const last=Math.max(...c.quarters.map(q=>q.idx));if(last>=ended)return false;
+    const due=c=>{if(!c)return true;const last=maxIdx(c);if(last>=ended)return false;
       if(!c.nextDate)return true;const d=(new Date(today)-new Date(c.nextDate))/864e5;return d>=-7};
     const want=mode==="full"||sunday?list:list.filter(x=>due(old[x.id]));checked=want.map(x=>x.id);
     const out=Object.assign({},old);let i=0;
     async function worker(){while(i<want.length){const x=want[i++];let co=null;try{co=await company(x.id,x)}catch(e){}
       if(!co||!co.quarters.length){failed.push(x.id);continue}
-      const o=old[x.id];if(o&&Math.max(...co.quarters.map(q=>q.idx))>Math.max(...o.quarters.map(q=>q.idx)))newResults.push(co.id);
       out[x.id]=co;await sleep(350)}}
     await Promise.all([worker(),worker(),worker()]);
-    bundle={built:today,universe:"Nifty Midcap 150",source:"Screener.in company pages (secondary source)",failed,companies:list.map(x=>out[x.id]).filter(Boolean)};
+    bundle={built:today,universe:"Nifty Midcap 150",source:"Screener.in company pages, with new results read from NSE filings",failed,companies:list.map(x=>out[x.id]).filter(Boolean)};
+  }
+  /* NSE filings: read new results at the source, and check Screener's figures against them */
+  const nse={ok:false,read:0,failed:[],added:[],held:[],differs:[]};
+  if(mode!=="prices"){
+    const cache=readJ(F("filings.json"),{});cache._failed=cache._failed||{};
+    const nonfin=bundle.companies.filter(c=>!isFin(c)),want=new Map(nonfin.map(c=>[c.id,c.basis]));
+    try{
+      const rows=await N.recent(1500)||[];nse.ok=rows.length>0;
+      if(mode==="full"||sunday||Object.keys(cache).length<2){
+        const q=nonfin.filter(c=>!(cache[c.id]&&cache[c.id][ended])).map(c=>c.id);
+        async function w(){while(q.length){const r=await N.forSymbol(q.shift());if(r){rows.push(...r);nse.ok=true}await sleep(250)}}
+        await Promise.all([w(),w()]);
+      }
+      const picks=N.pick(rows,want).filter(f=>f.idx>=ended-1&&f.idx<=ended&&!cache._failed[f.seq]&&!(cache[f.symbol]&&cache[f.symbol][f.idx]&&cache[f.symbol][f.idx].seq>=f.seq));
+      async function r(){while(picks.length){const f=picks.shift();
+        try{const xml=await N.get(f.xbrl);if(!xml){nse.failed.push(f.symbol+" "+E.plabel(f.idx)+": file could not be downloaded");continue}
+          const v=N.parse(xml,f);(cache[f.symbol]=cache[f.symbol]||{})[f.idx]={...f,...v};nse.read++}
+        catch(e){cache._failed[f.seq]=f.symbol+" "+E.plabel(f.idx)+": "+e.message;nse.failed.push(cache._failed[f.seq])}
+        await sleep(250)}}
+      await Promise.all([r(),r(),r()]);
+    }catch(e){nse.failed.push("NSE step stopped: "+e.message)}
+    for(const s in cache)if(s!=="_failed")for(const i in cache[s])if(+i<ended-4)delete cache[s][i];
+    for(const c of nonfin){const o=N.overlay(c,cache[c.id]);
+      if(o.added)nse.added.push(c.id);if(o.held)nse.held.push(c.id+": "+o.held);
+      const L=c.quarters.find(q=>q.idx===maxIdx(c));if(L&&L.check&&L.check.length)nse.differs.push(c.id+" "+L.period+": "+L.check.join("; "))}
+    bundle.companies.forEach(c=>{if(old[c.id]&&maxIdx(c)>oldMax[c.id])newResults.push(c.id)});
+    bundle.filingsChecked=new Date().toISOString();
+    fs.writeFileSync(F("filings.json"),JSON.stringify(cache));
     fs.writeFileSync(F("data.json"),JSON.stringify(bundle));
   }
   let px;
@@ -118,17 +148,18 @@ const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){re
   else{const b=await prices();px=b?{date:b.date,time:"close",src:"NSE end-of-day file",p:{}}:oldPx;if(b)bundle.companies.forEach(c=>{if(b.p[c.id]>0)px.p[c.id]=b.p[c.id]})}
   if(px)fs.writeFileSync(F("prices.json"),JSON.stringify(px));
   /* signals for everyone, compared with the last run */
-  const sig={},alerts=[],strong=[],res=[];
+  const sig={},alerts=[],strong=[],res=[],BUYS=new Set(["STRONG BUY","BUY"]);
   for(const c of bundle.companies){const full={...c,price:px&&px.p[c.id],priceDate:px&&px.date},r=E.resultImpact(full),A=r.A,o=state.signals[c.id];
     sig[c.id]={n:A.newInv,h:A.holder};
     if(A.strong)strong.push({id:c.id,name:c.name,price:full.price,quality:Math.round(A.quality),mos:Math.round(A.mos)});
-    if(newResults.includes(c.id))res.push({id:c.id,name:c.name,quarter:A.latest.period,verdict:A.cls,signal:A.newInv,holder:A.holder,quality:A.quality==null?null:Math.round(A.quality),flags:A.flags,changes:r.changes});
-    if(o){if(o.n!==A.newInv&&(o.n==="STRONG BUY"||A.newInv==="STRONG BUY"))alerts.push(c.name+" ("+c.id+"): "+o.n+" → "+A.newInv+" at ₹"+full.price);
+    if(newResults.includes(c.id))res.push({id:c.id,name:c.name,quarter:A.latest.period,verdict:A.cls,signal:A.newInv,holder:A.holder,quality:A.quality==null?null:Math.round(A.quality),flags:A.flags,changes:r.changes,
+      source:A.latest.src==="NSE"?"NSE filing":"Screener",filing:A.latest.filing||null});
+    if(o){if(o.n!==A.newInv&&(BUYS.has(o.n)||BUYS.has(A.newInv)))alerts.push(c.name+" ("+c.id+"): "+o.n+" → "+A.newInv+" at ₹"+full.price);
       if(o.h!==A.holder&&(o.h==="SELL"||A.holder==="SELL"))alerts.push(c.name+" ("+c.id+") for holders: "+o.h+" → "+A.holder+" at ₹"+full.price)}}
   strong.sort((a,b)=>b.mos-a.mos);
   fs.writeFileSync(F("state.json"),JSON.stringify({updated:new Date().toISOString(),mode,signals:sig}));
   const parts=[];if(res.length)parts.push(res.length+" new result"+(res.length>1?"s":"")+": "+res.map(r=>r.id+" "+r.signal).join(", "));
-  if(alerts.length)parts.push(alerts.map(a=>a.replace(/^.*\((.+?)\)/,"$1")).join("; "));
-  console.log(JSON.stringify({mode,today,priceDate:px&&px.date,priceTime:px&&px.time,priceMisses:px&&px.miss||[],checked,failed,newResults:res,alerts,strongBuy:strong.slice(0,10),
+  if(alerts.length)parts.push(alerts.map(a=>a.replace(/^.*?\(([^()]+)\)/,"$1")).join("; "));
+  console.log(JSON.stringify({mode,today,priceDate:px&&px.date,priceTime:px&&px.time,priceMisses:px&&px.miss||[],checked,failed,nse,newResults:res,alerts,strongBuy:strong.slice(0,10),
     message:parts.length?("Midcap desk: "+parts.join(" | ")).slice(0,195):""}));
 })();
