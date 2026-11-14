@@ -72,14 +72,21 @@ async function prices(){
       return{date:yy+"-"+mm+"-"+dd,p}}}
   return null;
 }
+/* Live prices. Yahoo first; if Yahoo refuses this machine (it blocks some cloud servers), Google Finance pages instead. */
 async function livePrices(list,old){
-  const p={},q=list.slice();let t=0,miss=[];
-  async function w(){while(q.length){const x=q.shift(),r=await get("https://query1.finance.yahoo.com/v8/finance/chart/"+encodeURIComponent(x.id)+".NS?interval=1d&range=1d",2);
-    try{const m=JSON.parse(r).chart.result[0].meta;if(m.regularMarketPrice>0){p[x.id]=m.regularMarketPrice;t=Math.max(t,m.regularMarketTime||0);continue}}catch(e){}
+  const p={},q=list.slice();let t=0,miss=[],yTried=0,yOk=0,gOk=0;
+  async function yahoo(id){if(yTried>=10&&!yOk)return false;yTried++;
+    const r=await get("https://query1.finance.yahoo.com/v8/finance/chart/"+encodeURIComponent(id)+".NS?interval=1d&range=1d",yOk?2:1);
+    try{const m=JSON.parse(r).chart.result[0].meta;if(m.regularMarketPrice>0){p[id]=m.regularMarketPrice;t=Math.max(t,m.regularMarketTime||0);yOk++;return true}}catch(e){}
+    return false}
+  async function google(id){const r=await get("https://www.google.com/finance/quote/"+encodeURIComponent(id)+":NSE",2);if(!r)return false;
+    const m=new RegExp('\\["'+id.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+'","NSE"\\],"[^"]*",\\d+,"INR",\\[([\\d.]+),[^\\]]*\\],[^\\[]*\\[(\\d{9,})\\]').exec(r);
+    if(m&&+m[1]>0){p[id]=+m[1];t=Math.max(t,+m[2]);gOk++;return true}return false}
+  async function w(){while(q.length){const x=q.shift();if(await yahoo(x.id)||await google(x.id))continue;
     miss.push(x.id);if(old&&old.p&&old.p[x.id])p[x.id]=old.p[x.id]}}
   await Promise.all([w(),w(),w(),w(),w()]);
   const d=t?new Date(t*1000+5.5*36e5):null;
-  return{date:d?iso(d):(old&&old.date)||null,time:d?d.toISOString().slice(11,16)+" IST":null,src:"Yahoo Finance (may be delayed)",p,miss};
+  return{date:d?iso(d):(old&&old.date)||null,time:d?d.toISOString().slice(11,16)+" IST":null,src:(gOk>yOk?"Google Finance":"Yahoo Finance")+" (may be delayed)",p,miss};
 }
 const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){return d}};
 (async()=>{
