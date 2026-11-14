@@ -1,0 +1,77 @@
+name: Midcap desk update
+
+# Times are UTC. India is UTC+5:30. GitHub may start scheduled runs 5 to 30 minutes late.
+on:
+  schedule:
+    - cron: "52 5,9 * * 1-5"   # price check, weekdays 11:22 and 15:22 IST
+    - cron: "8 16 * * *"       # evening research, daily 21:38 IST (full reload on Sundays)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        default: research
+        options: [prices, research, full, deploy-only]
+  push:
+    paths: [index.html, engine.js, data.json, prices.json]
+
+permissions:
+  contents: write
+  issues: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: midcap-desk
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Pick mode
+        id: mode
+        run: |
+          case "${{ github.event_name }}" in
+            schedule) if [ "${{ github.event.schedule }}" = "8 16 * * *" ]; then m=research; else m=prices; fi ;;
+            workflow_dispatch) m="${{ inputs.mode }}" ;;
+            *) m=deploy-only ;;
+          esac
+          echo "mode=$m" >> "$GITHUB_OUTPUT"
+
+      - name: Update data and send alerts
+        if: steps.mode.outputs.mode != 'deploy-only'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node tools/ci.js "${{ steps.mode.outputs.mode }}" .
+
+      - name: Save data to the repository
+        if: steps.mode.outputs.mode != 'deploy-only'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.json prices.json state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Data update (${{ steps.mode.outputs.mode }})"
+          git pull --rebase
+          git push
+
+      - name: Build site folder
+        run: mkdir _site && cp index.html engine.js data.json prices.json _site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
