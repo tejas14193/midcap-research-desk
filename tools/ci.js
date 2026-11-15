@@ -5,7 +5,7 @@
    Alerts go out when there is a new result or a signal moves into or out of BUY, STRONG BUY or SELL:
    - email, when SMTP_USER and SMTP_PASS are set (Gmail app password; sent to SMTP_TO or to SMTP_USER itself)
    - a GitHub issue, when GITHUB_TOKEN and GITHUB_REPOSITORY are set
-   - Telegram, when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set
+   - Telegram, when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (one or more chat IDs) are set
    - WhatsApp (CallMeBot), when WHATSAPP_RECIPIENTS is set: a short version of the alert to each number */
 "use strict";
 const { spawnSync } = require("child_process"), fs = require("fs"), path = require("path");
@@ -83,11 +83,7 @@ summary(log.map(x => "- " + x).join("\n") + "\n\n" + body);
     } catch (e) { console.error("GitHub issue failed: " + e.message) }
   }
   if (E.TELEGRAM_BOT_TOKEN && E.TELEGRAM_CHAT_ID) {
-    try {
-      const x = await fetch("https://api.telegram.org/bot" + E.TELEGRAM_BOT_TOKEN + "/sendMessage", { method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: E.TELEGRAM_CHAT_ID, text: (title + "\n\n" + plain).slice(0, 4000), disable_web_page_preview: true }) });
-      console.log("Telegram: " + x.status);
-    } catch (e) { console.error("Telegram failed: " + e.message) }
+    try { for (const l of await require("./telegram.js").sendAll(title + "\n\n" + plain)) { console.log(l); if (/failed/.test(l)) summary("**" + l + "**") } }
+    catch (e) { console.error("Telegram failed: " + e.message) }
   }
 })();

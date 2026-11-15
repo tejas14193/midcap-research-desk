@@ -12,7 +12,7 @@ on:
         description: "What to run"
         type: choice
         default: research
-        options: [prices, filings, research, full, deploy-only, test-email, test-whatsapp]
+        options: [prices, filings, research, full, deploy-only, test-email, test-whatsapp, test-telegram]
   push:
     paths: [index.html, engine.js, data.json, prices.json]
 
@@ -69,6 +69,13 @@ jobs:
         env:
           WHATSAPP_RECIPIENTS: ${{ secrets.WHATSAPP_RECIPIENTS }}
         run: node tools/whatsapp.js
+
+      - name: Set up and test Telegram
+        if: steps.mode.outputs.mode == 'test-telegram'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node tools/telegram.js
 
       - name: Update data and send alerts
         if: steps.mode.outputs.mode != 'deploy-only' && !startsWith(steps.mode.outputs.mode, 'test-')

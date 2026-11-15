@@ -37,7 +37,7 @@ Email needs two repository secrets: `SMTP_USER` (the Gmail address) and `SMTP_PA
 
 For WhatsApp (free, through CallMeBot, personal use): each person who wants alerts saves CallMeBot's number (see https://www.callmebot.com/?p=4333; +34 698 28 89 73 as of Nov 2026) in their phone and sends it "I allow callmebot to send me messages" on WhatsApp. The bot replies with an API key. Add a repository secret `WHATSAPP_RECIPIENTS` with one `phone:apikey` line per person, for example `+919800000000:123456`. To check it works: Run workflow → `test-whatsapp`.
 
-For Telegram as well, add two repository secrets (Settings → Secrets and variables → Actions): `TELEGRAM_BOT_TOKEN` (from @BotFather) and `TELEGRAM_CHAT_ID`.
+For Telegram (recommended over WhatsApp; free and reliable): create a bot with @BotFather and save its token as the secret `TELEGRAM_BOT_TOKEN`. Open the bot and tap Start (for a group, add the bot and send `/start@<botname>`). Then Run workflow → `test-telegram`: the bot messages each chat its chat ID. Save the IDs, one per line, as the secret `TELEGRAM_CHAT_ID`, and run `test-telegram` again to confirm.
 
 ## Run on your own PC
 

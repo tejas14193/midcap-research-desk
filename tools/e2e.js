@@ -48,10 +48,14 @@ const filing = (c, idx, over) => { const q = { ...quarter(c._o, idx, c._o.n - 1 
 
 /* ---------- local stand-in for the WhatsApp service ---------- */
 const sent = [];
-const server = http.createServer((req, res) => { const u = new URL(req.url, "http://x"); sent.push({ phone: u.searchParams.get("phone"), key: u.searchParams.get("apikey"), text: u.searchParams.get("text") }); res.end("Message queued.") });
+const tg = [];
+const server = http.createServer((req, res) => {
+  if (req.url.startsWith("/botTESTTOKEN/")) { let b = ""; req.on("data", d => b += d).on("end", () => { tg.push(JSON.parse(b)); res.setHeader("Content-Type", "application/json"); res.end('{"ok":true,"result":{}}') }); return }
+  const u = new URL(req.url, "http://x"); sent.push({ phone: u.searchParams.get("phone"), key: u.searchParams.get("apikey"), text: u.searchParams.get("text") }); res.end("Message queued.") });
 const run = () => new Promise((resolve, reject) => {
-  const env = { ...process.env, WHATSAPP_RECIPIENTS: "+910000000001:key1\n+910000000002:key2", WHATSAPP_API_URL: "http://127.0.0.1:" + server.address().port + "/whatsapp.php" };
-  for (const k of ["GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_STEP_SUMMARY", "SMTP_USER", "SMTP_PASS", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]) delete env[k];
+  const env = { ...process.env, WHATSAPP_RECIPIENTS: "+910000000001:key1\n+910000000002:key2", WHATSAPP_API_URL: "http://127.0.0.1:" + server.address().port + "/whatsapp.php",
+    TELEGRAM_BOT_TOKEN: "TESTTOKEN", TELEGRAM_CHAT_ID: "111111111, -1002222222222", TELEGRAM_API_URL: "http://127.0.0.1:" + server.address().port };
+  for (const k of ["GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_STEP_SUMMARY", "SMTP_USER", "SMTP_PASS"]) delete env[k];
   execFile(process.execPath, [path.join(__dirname, "ci.js"), "recompute", dir], { env, maxBuffer: 32e6 }, (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out));
 });
 const sig = id => R("state.json").signals[id];
@@ -99,6 +103,8 @@ const sig = id => R("state.json").signals[id];
   ok("day 2: one WhatsApp per recipient, to the right numbers", sent.length === 2 && sent[0].phone === "+910000000001" && sent[0].key === "key1" && sent[1].phone === "+910000000002");
   ok("day 2: the WhatsApp text carries results, signal changes and targets", /Golf Dummy/.test(sent[0].text) && /Signal changes:/.test(sent[0].text) && /Targets:/.test(sent[0].text) && /not investment advice/.test(sent[0].text));
   ok("day 2: phone numbers are masked in the log", /WhatsApp \+91…001: sent/.test(out) && !/910000000001/.test(out));
+  ok("day 2: Telegram goes to each saved chat, including a group", tg.length === 2 && tg[0].chat_id === "111111111" && tg[1].chat_id === "-1002222222222" && /Golf Dummy/.test(tg[0].text) && /Targets/.test(tg[0].text));
+  ok("day 2: Telegram chat IDs are masked in the log", /Telegram 11…111: sent/.test(out) && /Telegram -1…222: sent/.test(out) && !/1002222222222/.test(out));
 
   /* ---- Day 3: BRAVO files a good quarter, INDIA becomes very expensive, GOLF must wait before a new target ---- */
   const before = T.open.BRAVO.target; sent.length = 0;
@@ -115,8 +121,8 @@ const sig = id => R("state.json").signals[id];
   ok("day 3: strong buy list is in the alert", /\*\*Strong buy list\*\*\n- Alpha Dummy Ltd\./.test(out));
 
   /* ---- Day 3 again: nothing changed, so nothing is sent ---- */
-  sent.length = 0; out = await run();
-  ok("re-run with no changes sends nothing", sent.length === 0 && !/Signal changes|\*\*Targets\*\*/.test(out));
+  sent.length = 0; tg.length = 0; out = await run();
+  ok("re-run with no changes sends nothing", sent.length === 0 && tg.length === 0 && !/Signal changes|\*\*Targets\*\*/.test(out));
 
   server.close();
   console.log(n + " end-to-end checks passed");
