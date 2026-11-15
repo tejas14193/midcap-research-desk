@@ -1,0 +1,7 @@
+{
+  "note": "Companies tracked in addition to the Nifty Midcap 150. Add one entry per company: NSE symbol, name and NSE industry (from NSE's index lists). They survive the weekly reload of the index list.",
+  "companies": [
+    { "id": "TANLA", "name": "Tanla Platforms Ltd.", "industry": "Information Technology" },
+    { "id": "HFCL", "name": "HFCL Ltd.", "industry": "Telecommunication" }
+  ]
+}

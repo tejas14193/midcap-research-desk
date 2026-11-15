@@ -149,7 +149,7 @@ function srcNote(q){
 function vCompany(){
   const c=DATA.companies.find(x=>x.id===sel);if(!c)return vHome();
   const r=an(c),A=r.A,M=A.m||{},f=full(c),w=prefs.watch.includes(c.id);
-  let o='<div><button data-view="home">← Dashboard</button></div><section class="card stack"><div class="row"><div class="grow"><h3 style="font-size:18px">'+esc(c.name)+'</h3><span class="sub">'+esc(c.id)+" · "+esc(c.industry)+(c.mcap?" · m-cap ₹"+n0(c.mcap)+" cr":"")+"</span></div>"+pill(A.headline)+"</div>"+
+  let o='<div><button data-view="home">← Dashboard</button></div><section class="card stack"><div class="row"><div class="grow"><h3 style="font-size:18px">'+esc(c.name)+'</h3><span class="sub">'+esc(c.id)+" · "+esc(c.industry)+(c.mcap?" · m-cap ₹"+n0(c.mcap)+" cr":"")+(c.extra?" · added by you (not in Nifty Midcap 150)":"")+"</span></div>"+pill(A.headline)+"</div>"+
    '<div class="row"><button data-act="watch">'+(w?"Remove from watchlist":"Add to watchlist")+'</button><label class="inline"><input type="checkbox" id="held" '+(f.held?"checked":"")+'> I hold this stock</label></div>'+
    '<p class="sub">Price ₹'+n1(f.price)+" · "+dt(f.priceDate)+(PX&&PX.time?" "+esc(PX.time):"")+" · "+esc(PX&&PX.src||"")+"</p></section>";
   o+='<section class="card stack"><h2>Research signal</h2><div class="kv"><div><b>'+esc(A.newInv)+"</b><span>New investor</span></div><div><b>"+esc(A.holder)+"</b><span>Existing holder</span></div><div><b>"+(A.quality==null?"n/a":A.quality.toFixed(0)+" / 100")+"</b><span>Quality score</span></div><div><b>"+(A.mos==null?"n/a":(A.mos>=0?A.mos.toFixed(0)+"% below":(-A.mos).toFixed(0)+"% above"))+"</b><span>Price vs base fair value</span></div></div>";
@@ -211,7 +211,7 @@ window.addEventListener("hashchange",()=>{const h=location.hash.slice(1),v=h==="
 (async()=>{
   const st=document.getElementById("status");
   try{const [d,p]=await Promise.all([fetch("data.json",{cache:"no-store"}).then(r=>r.json()),fetch("prices.json",{cache:"no-store"}).then(r=>r.json())]);DATA=d;PX=p;
-    st.textContent=d.companies.length+" "+d.universe+" companies · prices "+dt(p.date)+(p.time?" "+p.time:"")+" · results checked "+dt(d.filingsChecked||d.built);
+    st.textContent=d.companies.length+" companies ("+d.universe+") · prices "+dt(p.date)+(p.time?" "+p.time:"")+" · results checked "+dt(d.filingsChecked||d.built);
     if(location.hash==="#rules")view="rules";render();
   }catch(e){st.textContent="The company data could not be loaded. Close and reopen the page to try again."}
 })();

@@ -65,8 +65,11 @@ async function company(sym,meta){
 }
 async function midcapList(){
   const t=await get("https://nsearchives.nseindia.com/content/indices/ind_niftymidcap150list.csv");if(!t)throw new Error("Could not load the Nifty Midcap 150 list from NSE");
-  return t.trim().split(/\r?\n/).slice(1).map(l=>{const c=l.split(",");return{name:c[0].trim(),industry:c[1].trim(),id:c[2].trim()}}).filter(x=>x.id);
+  const L=t.trim().split(/\r?\n/).slice(1).map(l=>{const c=l.split(",");return{name:c[0].trim(),industry:c[1].trim(),id:c[2].trim()}}).filter(x=>x.id);
+  return L.concat(extras().filter(x=>!L.some(y=>y.id===x.id)));
 }
+/* Companies the user added on top of the index (extra.json in the repository root). */
+function extras(){try{return(JSON.parse(fs.readFileSync(path.join(__dirname,"..","extra.json"),"utf8")).companies||[]).filter(x=>x&&x.id).map(x=>({id:String(x.id).trim().toUpperCase(),name:x.name||x.id,industry:x.industry||"",extra:true}))}catch(e){return[]}}
 async function prices(){
   for(let back=0;back<8;back++){const d=new Date(Date.now()+5.5*36e5-back*864e5),dd=String(d.getUTCDate()).padStart(2,"0"),mm=String(d.getUTCMonth()+1).padStart(2,"0"),yy=d.getUTCFullYear();
     const t=await get("https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_"+dd+mm+yy+".csv",1);
@@ -103,16 +106,17 @@ const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){re
   /* quarter that has most recently ended */
   const m=now.getUTCMonth(),y=now.getUTCFullYear(),ended=E.colIdx(["Dec","Mar","Jun","Sep"][Math.floor(m/3)]+" "+(m<3?y-1:y));
   if(mode==="full"||mode==="research"){
-    const list=mode==="full"||sunday||!bundle?await midcapList():bundle.companies.map(c=>({id:c.id,name:c.name,industry:c.industry}));
+    const list=mode==="full"||sunday||!bundle?await midcapList():bundle.companies.map(c=>({id:c.id,name:c.name,industry:c.industry,extra:c.extra})).concat(extras().filter(x=>!bundle.companies.some(c=>c.id===x.id)));
     const due=c=>{if(!c)return true;const last=maxIdx(c);if(last>=ended)return false;
       if(!c.nextDate)return true;const d=(new Date(today)-new Date(c.nextDate))/864e5;return d>=-7};
     const want=mode==="full"||sunday?list:list.filter(x=>due(old[x.id]));checked=want.map(x=>x.id);
     const out=Object.assign({},old);let i=0;
     async function worker(){while(i<want.length){const x=want[i++];let co=null;try{co=await company(x.id,x)}catch(e){}
       if(!co||!co.quarters.length){failed.push(x.id);continue}
-      out[x.id]=co;await sleep(350)}}
+      if(x.extra)co.extra=true;out[x.id]=co;await sleep(350)}}
     await Promise.all([worker(),worker(),worker()]);
-    bundle={built:today,universe:"Nifty Midcap 150",source:"Screener.in company pages, with new results read from NSE filings",failed,companies:list.map(x=>out[x.id]).filter(Boolean)};
+    const nx=list.filter(x=>x.extra&&out[x.id]).length;
+    bundle={built:today,universe:"Nifty Midcap 150"+(nx?" + "+nx+" added":""),source:"Screener.in company pages, with new results read from NSE filings",failed,companies:list.map(x=>out[x.id]).filter(Boolean)};
   }
   /* NSE filings: read new results at the source, and check Screener's figures against them */
   const nse={ok:false,read:0,failed:[],added:[],held:[],differs:[]};
