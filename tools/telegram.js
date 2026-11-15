@@ -9,10 +9,16 @@ const mask = id => { id = String(id); return id.slice(0, 2) + "…" + id.slice(-
 const chats = (raw = process.env.TELEGRAM_CHAT_ID || "") => [...new Set(raw.split(/[\s,;]+/).map(s => s.trim()).filter(s => /^-?\d{3,}$/.test(s)))];
 
 async function call(method, body) {
-  const r = await fetch(base() + "/" + method, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), signal: AbortSignal.timeout(30000) });
-  const j = await r.json().catch(() => ({ ok: false, description: "HTTP " + r.status }));
-  if (!j.ok) throw new Error(j.description || "HTTP " + r.status);
-  return j.result;
+  let last;
+  for (let i = 0; i < 3; i++) {
+    let r;
+    try { r = await fetch(base() + "/" + method, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), signal: AbortSignal.timeout(45000) }) }
+    catch (e) { last = new Error("network: " + (e.cause && e.cause.code || e.name || e.message)); await new Promise(r => setTimeout(r, 5000 * (i + 1))); continue }
+    const j = await r.json().catch(() => ({ ok: false, description: "HTTP " + r.status }));
+    if (!j.ok) { const e = new Error(j.description || "HTTP " + r.status); e.status = r.status; throw e }
+    return j.result;
+  }
+  throw last;
 }
 /* Sends the same text to every chat. Never throws; returns one line per chat for the run log. */
 async function sendAll(text, list = chats()) {
@@ -37,7 +43,9 @@ module.exports = { sendAll, discover, chats, mask };
 
 if (require.main === module) (async () => {
   if (!process.env.TELEGRAM_BOT_TOKEN) { console.error("Telegram: the TELEGRAM_BOT_TOKEN secret is not set"); process.exit(1) }
-  let me; try { me = await call("getMe") } catch (e) { console.error("Telegram: the bot token was refused (" + e.message + "). Copy it again from @BotFather."); process.exit(1) }
+  let me; try { me = await call("getMe") } catch (e) {
+    console.error(/^network/.test(e.message) ? "Telegram: could not reach api.telegram.org (" + e.message + ")" : "Telegram: the bot token was refused (" + e.message + "). Copy it again from @BotFather, with no spaces.");
+    process.exit(1) }
   console.log("Bot: @" + me.username);
   const saved = chats(), found = await discover().catch(e => { console.error("Could not read new chats: " + e.message); return [] });
   console.log("Chat IDs saved in TELEGRAM_CHAT_ID: " + (saved.length ? saved.map(mask).join(", ") : "none"));

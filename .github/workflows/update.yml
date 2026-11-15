@@ -75,7 +75,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: node tools/telegram.js
+        run: |
+          curl -sS -m 20 -o /dev/null -w "api.telegram.org reachable: HTTP %{http_code} in %{time_total}s\n" https://api.telegram.org/ || echo "api.telegram.org NOT reachable with curl"
+          node tools/telegram.js
 
       - name: Update data and send alerts
         if: steps.mode.outputs.mode != 'deploy-only' && !startsWith(steps.mode.outputs.mode, 'test-')
