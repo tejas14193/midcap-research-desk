@@ -75,7 +75,9 @@ async function prices(){
   for(let back=0;back<8;back++){const d=new Date(Date.now()+5.5*36e5-back*864e5),dd=String(d.getUTCDate()).padStart(2,"0"),mm=String(d.getUTCMonth()+1).padStart(2,"0"),yy=d.getUTCFullYear();
     const t=await get("https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_"+dd+mm+yy+".csv",1);
     if(t&&t.startsWith("SYMBOL")){const p={};for(const l of t.split(/\r?\n/).slice(1)){const c=l.split(",").map(s=>s.trim());if(c[1]==="EQ"||(c[1]==="BE"&&!(c[0] in p)))p[c[0]]=+c[8]}
-      return{date:yy+"-"+mm+"-"+dd,p}}}
+      /* trust the trade date inside the file, not the file name: NSE can serve the last session's file under a holiday's name */
+      const row=(t.split(/\r?\n/)[1]||"").split(",").map(s=>s.trim()),dm=/^(\d{2})-([A-Za-z]{3})-(\d{4})$/.exec(row[2]||""),MN={Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12"};
+      return{date:dm&&MN[dm[2]]?dm[3]+"-"+MN[dm[2]]+"-"+dm[1]:yy+"-"+mm+"-"+dd,p}}}
   return null;
 }
 /* Live prices. Yahoo first; if Yahoo refuses this machine (it blocks some cloud servers), Google Finance pages instead. */
