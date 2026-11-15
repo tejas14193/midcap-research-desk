@@ -5,7 +5,7 @@ on:
   schedule:
     - cron: "52 5,9 * * 1-5"   # price check, weekdays 11:22 and 15:22 IST
     - cron: "40 11,13 * * *"   # NSE filings check, daily 17:10 and 19:10 IST
-    - cron: "8 16 * * *"       # evening research, daily 21:38 IST (Screener + NSE; full reload on Sundays)
+    - cron: "9 16 * * *"       # evening research, daily 21:39 IST (Screener + NSE; full reload on Sundays)
   workflow_dispatch:
     inputs:
       mode:
@@ -45,7 +45,7 @@ jobs:
           case "${{ github.event_name }}" in
             schedule)
               case "${{ github.event.schedule }}" in
-                "8 16 * * *") m=research ;;
+                "9 16 * * *") m=research ;;
                 "40 11,13 * * *") m=filings ;;
                 *) m=prices ;;
               esac ;;
