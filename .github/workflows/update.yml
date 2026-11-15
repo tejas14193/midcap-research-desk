@@ -76,7 +76,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          curl -sS -m 20 -o /dev/null -w "api.telegram.org reachable: HTTP %{http_code} in %{time_total}s\n" https://api.telegram.org/ || echo "api.telegram.org NOT reachable with curl"
+          T=$(printf %s "$TELEGRAM_BOT_TOKEN" | tr -d '[:space:]')
+          curl -sS -4 -m 20 -o /dev/null -w "Bot token check with curl: HTTP %{http_code} (200 = token accepted, 401 or 404 = wrong token)\n" "https://api.telegram.org/bot$T/getMe" || echo "api.telegram.org NOT reachable with curl"
           node tools/telegram.js
 
       - name: Update data and send alerts

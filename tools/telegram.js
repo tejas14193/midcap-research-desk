@@ -4,7 +4,9 @@
    node tools/telegram.js        setup and test: finds every chat that has started the bot (or added it to a group) in the last
                                  24 hours, and sends each one a test message that includes its own chat ID; also sends to TELEGRAM_CHAT_ID. */
 "use strict";
-const base = () => (process.env.TELEGRAM_API_URL || "https://api.telegram.org") + "/bot" + process.env.TELEGRAM_BOT_TOKEN;
+require("dns").setDefaultResultOrder("ipv4first");          /* GitHub runners have no IPv6 route; Node's fetch can hang on api.telegram.org's IPv6 address */
+const token = () => String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+const base = () => (process.env.TELEGRAM_API_URL || "https://api.telegram.org") + "/bot" + token();
 const mask = id => { id = String(id); return id.slice(0, 2) + "…" + id.slice(-3) };
 const chats = (raw = process.env.TELEGRAM_CHAT_ID || "") => [...new Set(raw.split(/[\s,;]+/).map(s => s.trim()).filter(s => /^-?\d{3,}$/.test(s)))];
 
@@ -42,7 +44,7 @@ async function discover() {
 module.exports = { sendAll, discover, chats, mask };
 
 if (require.main === module) (async () => {
-  if (!process.env.TELEGRAM_BOT_TOKEN) { console.error("Telegram: the TELEGRAM_BOT_TOKEN secret is not set"); process.exit(1) }
+  if (!token()) { console.error("Telegram: the TELEGRAM_BOT_TOKEN secret is not set"); process.exit(1) }
   let me; try { me = await call("getMe") } catch (e) {
     console.error(/^network/.test(e.message) ? "Telegram: could not reach api.telegram.org (" + e.message + ")" : "Telegram: the bot token was refused (" + e.message + "). Copy it again from @BotFather, with no spaces.");
     process.exit(1) }
