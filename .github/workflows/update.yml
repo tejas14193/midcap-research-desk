@@ -54,8 +54,8 @@ jobs:
           esac
           echo "mode=$m" >> "$GITHUB_OUTPUT"
 
-      - name: Test the NSE filing reader
-        run: node tools/test.js
+      - name: Run the tests
+        run: node tools/test.js && node tools/e2e.js
 
       - name: Send a test email
         if: steps.mode.outputs.mode == 'test-email'
@@ -87,6 +87,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data.json prices.json state.json
+          [ -f targets.json ] && git add targets.json
           [ -f filings.json ] && git add filings.json
           git diff --cached --quiet && exit 0
           git commit -m "Data update (${{ steps.mode.outputs.mode }})"
@@ -95,7 +96,7 @@ jobs:
 
       - name: Build site folder
         if: "!startsWith(steps.mode.outputs.mode, 'test-')"
-        run: mkdir _site && cp index.html engine.js data.json prices.json _site/
+        run: mkdir _site && cp index.html engine.js data.json prices.json _site/ && { [ ! -f targets.json ] || cp targets.json _site/; }
       - uses: actions/configure-pages@v5
         if: "!startsWith(steps.mode.outputs.mode, 'test-')"
       - uses: actions/upload-pages-artifact@v3

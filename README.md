@@ -9,6 +9,8 @@ Rule-based fundamental research signals for the Nifty Midcap 150. A static dashb
 - `tools/update.js`: the updater (`full`, `research`, `filings`, `prices`). Node 18+, no dependencies.
 - `tools/nse.js`: reads quarterly results from NSE "Integrated Filing - Financials" XBRL files (standard Ind AS format, non-financial companies).
 - `tools/test.js`: tests for the NSE reader, using real filings in `tests/fixtures`. Run `node tools/test.js`.
+- `tools/targets.js`, `targets.json`: target prices for buy-rated companies and their track record.
+- `tools/e2e.js`: end-to-end test on dummy data, with no network. Scores made-up companies over three days and checks signals, targets, alerts and WhatsApp messages. Run `node tools/e2e.js`.
 - `tools/ci.js`: runs the updater in GitHub Actions, checks the result, and sends alerts.
 - `tools/mail.js`: sends alert emails through Gmail.
 - `filings.json`: cache of NSE filings already read.
@@ -51,3 +53,7 @@ npx serve .
 - Yahoo Finance, then Google Finance: intraday prices (may be delayed).
 
 How NSE filings are used: for non-financial companies, each quarter on file is checked against the company's NSE filing and differences over 2% are shown on the company page. A new quarter is read from the filing before Screener has it, but only when the company's previous filing agreed with Screener; otherwise the app waits for Screener. Debt, cash and net worth always come from Screener. Banks, NBFCs and insurers file in other formats and use Screener only.
+
+## Target prices
+
+When a company becomes BUY or STRONG BUY, its base fair value that day is recorded as the target. The target stays open after the signal changes. It closes when the price reaches it, is withdrawn if quality falls below 55 or a new red flag appears, is revised after each new result, and expires after 3 years. The time estimate is a range that assumes the price rises only as fast as earnings per share; it is a rough guide, not a forecast. Closed targets are kept, and the dashboard shows the track record.

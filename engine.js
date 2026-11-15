@@ -1,11 +1,13 @@
 /* Midcap Research Desk scoring engine. Shared by the page (browser) and tools/update.js (node). Deterministic: no LLM involved. */
 (function(root){
 "use strict";
-const RULES={version:"0.2",
+const RULES={version:"0.3",
   weights:{growth:35,profit:25,strength:25,gov:15},
   buyQuality:65,watchQuality:55,sellQuality:40,mos:15,overBull:50,
   strongQuality:80,strongMos:20,strongGrowth:60,bearMult:0.75,bullMult:1.25,maxMult:40,strongQuarters:8,
-  minQuarters:5,priceStaleDays:10,resultStaleDays:200,clsBand:5,marginBand:0.5};
+  minQuarters:5,priceStaleDays:10,resultStaleDays:200,clsBand:5,marginBand:0.5,
+  /* target price: growth used for the time estimate is the lower of 1-year and 2-year EPS growth; slower case cuts it by a quarter */
+  target:{cut:0.75,cap:20,fastCap:30,minGrowth:5,maxMonths:36,cooldownDays:30,cyclical:["Metals & Mining","Oil Gas & Consumable Fuels","Construction Materials","Chemicals"]}};
 const LABEL={growth:"Growth",profit:"Profitability",strength:"Financial strength",gov:"Governance"};
 const MON={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
 /* Quarter index on the Indian April-March year: idx = FY*4 + (quarter-1). "Sep 2026" is Q2 FY27. */
@@ -50,7 +52,7 @@ function analyse(co,now){
       roe:T.pat!=null&&bs&&bs.equity>0?T.pat/bs.equity*100:null,
       mTtm:T.rev>0&&T.ebitda!=null?T.ebitda/T.rev*100:null,mTtm0:T.rev0>0&&T.ebitda0!=null?T.ebitda0/T.rev0*100:null,
       netDebt:nd,ndE:nd!=null&&T.ebitda>0?nd/T.ebitda:null,cov:T.int>0&&T.ebitda!=null?T.ebitda/T.int:null,
-      pledge:L.pledge!=null?L.pledge:(co.pledge!=null?co.pledge:null),epsTtm:T.eps,gnpa:gn};
+      pledge:L.pledge!=null?L.pledge:(co.pledge!=null?co.pledge:null),epsTtm:T.eps,eps1:ttm("eps",li-4),eps2:ttm("eps",li-8),gnpa:gn};
     M.mDelta=M.mTtm!=null&&M.mTtm0!=null?M.mTtm-M.mTtm0:null;
     A.scores.growth=avg([lin(M.revG,0,15),lin(M.patG,0,20)]);
     if(fin){A.scores.profit=lin(M.roe,8,18);A.scores.strength=M.gnpa==null?null:100-lin(M.gnpa,1.5,6)}
@@ -124,6 +126,21 @@ function resultImpact(co,now){
   b.flags.filter(f=>!a.flags.includes(f)).forEach(f=>o.push("New red flag: "+f));
   return{A,changes:o,prev:a};
 }
-const api={RULES,LABEL,colIdx,pidx,plabel,qEnd,analyse,snap,resultImpact};
+/* How long the price may take to reach a target, if it only rises as fast as earnings (no change in P/E).
+   Returns {lo,hi} in months (lo from the observed growth rate, hi from the cautious one), or {none:"reason"}. */
+function eta(co,A,price,target){
+  const T=RULES.target,M=A.m||{},o={cyclical:T.cyclical.includes(co.industry)};
+  if(!(price>0)||!(target>0))return{...o,none:"no price or target"};
+  if(price>=target)return{...o,reached:true};
+  const g1=M.epsTtm>0&&M.eps1>0?(M.epsTtm/M.eps1-1)*100:null,g2=M.epsTtm>0&&M.eps2>0?(Math.sqrt(M.epsTtm/M.eps2)-1)*100:null;
+  const gs=[g1,g2].filter(v=>v!=null);if(!gs.length)return{...o,none:"there is not enough earnings history to measure growth"};
+  const raw=Math.min(...gs),slow=Math.min(raw*T.cut,T.cap),fast=Math.min(raw,T.fastCap);o.g1=g1;o.g2=g2;o.slow=slow;o.fast=fast;
+  if(slow<T.minGrowth)return{...o,none:raw<=0?"earnings per share are not growing":"earnings per share are growing too slowly (under "+T.minGrowth+"% a year on the cautious estimate)"};
+  const mo=g=>Math.log(target/price)/Math.log(1+g/100)*12,lo=Math.max(1,Math.round(mo(fast))),hi=Math.max(lo,Math.round(mo(slow)));
+  if(lo>T.maxMonths)return{...o,none:"at the current growth in earnings it would take more than "+T.maxMonths/12+" years"};
+  o.lo=lo;o.hi=hi;o.text=hi>T.maxMonths?"about "+lo+" months or longer":lo===hi?"about "+lo+" months":"about "+lo+" to "+hi+" months";o.short=hi>T.maxMonths?lo+"+ mo":lo===hi?lo+" mo":lo+"–"+hi+" mo";
+  return o;
+}
+const api={RULES,LABEL,colIdx,pidx,plabel,qEnd,analyse,snap,resultImpact,eta};
 if(typeof module!=="undefined"&&module.exports)module.exports=api;else root.Engine=api;
 })(typeof globalThis!=="undefined"?globalThis:this);

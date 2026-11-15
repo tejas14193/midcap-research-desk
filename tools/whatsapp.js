@@ -17,7 +17,7 @@ function recipients(raw = process.env.WHATSAPP_RECIPIENTS || "") {
 async function sendAll(text, list = recipients()) {
   const out = [], body = text.length > 1500 ? text.slice(0, 1480) + "\n… (more on the dashboard)" : text;
   for (const r of list) {
-    const url = "https://api.callmebot.com/whatsapp.php?phone=" + encodeURIComponent(r.phone) + "&apikey=" + encodeURIComponent(r.key) + "&text=" + encodeURIComponent(body);
+    const url = (process.env.WHATSAPP_API_URL || "https://api.callmebot.com/whatsapp.php") + "?phone=" + encodeURIComponent(r.phone) + "&apikey=" + encodeURIComponent(r.key) + "&text=" + encodeURIComponent(body);
     let ok = false, why = "";
     for (let i = 0; i < 2 && !ok; i++) {
       try {

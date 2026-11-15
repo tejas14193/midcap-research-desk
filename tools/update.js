@@ -4,12 +4,13 @@
    node update.js full <dir>      reload every Nifty Midcap 150 company from Screener, end-of-day prices from NSE
    node update.js research <dir>  evening run: reload companies near their expected result date (everything on Sundays), end-of-day prices
    node update.js filings <dir>   quick evening run: new results from NSE filings only, end-of-day prices
+   node update.js recompute <dir> no network: rescore the files as they are (used by tools/e2e.js)
    node update.js prices <dir>    market-hours run: live prices only, from Yahoo Finance
    Prints a JSON summary on the last line: alerts, newResults, strongBuy, message. */
 "use strict";
 const fs=require("fs"),path=require("path");
 let E;try{E=require("../engine.js")}catch(e){E=require("./engine.js")}
-const N=require("./nse.js");
+const N=require("./nse.js"),TG=require("./targets.js");
 const UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
 const SCR="https://www.screener.in";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -95,7 +96,7 @@ async function livePrices(list,old){
 }
 const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){return d}};
 (async()=>{
-  const [mode,dir]=process.argv.slice(2);if(!["full","research","filings","prices"].includes(mode)||!dir){console.error("usage: update.js full|research|filings|prices <dir>");process.exit(2)}
+  const [mode,dir]=process.argv.slice(2);if(!["full","research","filings","prices","recompute"].includes(mode)||!dir){console.error("usage: update.js full|research|filings|prices|recompute <dir>");process.exit(2)}
   fs.mkdirSync(dir,{recursive:true});const F=n=>path.join(dir,n);
   let bundle=readJ(F("data.json"),null);const state=readJ(F("state.json"),{signals:{}}),oldPx=readJ(F("prices.json"),null);
   const now=new Date(Date.now()+5.5*36e5),today=iso(now),sunday=now.getUTCDay()===0;
@@ -120,10 +121,11 @@ const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){re
   }
   /* NSE filings: read new results at the source, and check Screener's figures against them */
   const nse={ok:false,read:0,failed:[],added:[],held:[],differs:[]};
+  const offline=mode==="recompute";   /* no network: files as they are, plus cached filings. Used by tools/e2e.js */
   if(mode!=="prices"){
     const cache=readJ(F("filings.json"),{});cache._failed=cache._failed||{};
     const nonfin=bundle.companies.filter(c=>!isFin(c)),want=new Map(nonfin.map(c=>[c.id,c.basis]));
-    try{
+    if(!offline)try{
       const rows=await N.recent(1500)||[];nse.ok=rows.length>0;
       if(mode==="full"||sunday||Object.keys(cache).length<2){
         const q=nonfin.filter(c=>!(cache[c.id]&&cache[c.id][ended])).map(c=>c.id);
@@ -148,22 +150,29 @@ const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){re
     fs.writeFileSync(F("data.json"),JSON.stringify(bundle));
   }
   let px;
-  if(mode==="prices")px=await livePrices(bundle.companies,oldPx);
+  if(offline)px=oldPx;
+  else if(mode==="prices")px=await livePrices(bundle.companies,oldPx);
   else{const b=await prices();px=b?{date:b.date,time:"close",src:"NSE end-of-day file",p:{}}:oldPx;if(b)bundle.companies.forEach(c=>{if(b.p[c.id]>0)px.p[c.id]=b.p[c.id]})}
   if(px)fs.writeFileSync(F("prices.json"),JSON.stringify(px));
   /* signals for everyone, compared with the last run */
   const sig={},alerts=[],strong=[],res=[],BUYS=new Set(["STRONG BUY","BUY"]);
+  const T=readJ(F("targets.json"),{open:{},closed:[]}),tEvents=[],seeding=!fs.existsSync(F("targets.json"));
   for(const c of bundle.companies){const full={...c,price:px&&px.p[c.id],priceDate:px&&px.date},r=E.resultImpact(full),A=r.A,o=state.signals[c.id];
     sig[c.id]={n:A.newInv,h:A.holder};
+    const ev=px&&px.date?TG.step(T,c,A,full.price,px.date):null;let tgt="";
+    if(ev&&ev.type==="set"){const e=E.eta(c,A,full.price,ev.t.target);tgt="; target ₹"+ev.t.target+(e.text?", likely in "+e.text:"")}
+    else if(ev)tEvents.push({type:ev.type,text:ev.text});
     if(A.strong)strong.push({id:c.id,name:c.name,price:full.price,quality:Math.round(A.quality),mos:Math.round(A.mos)});
     if(newResults.includes(c.id))res.push({id:c.id,name:c.name,quarter:A.latest.period,verdict:A.cls,signal:A.newInv,holder:A.holder,quality:A.quality==null?null:Math.round(A.quality),flags:A.flags,changes:r.changes,
       source:A.latest.src==="NSE"?"NSE filing":"Screener",filing:A.latest.filing||null});
-    if(o){if(o.n!==A.newInv&&(BUYS.has(o.n)||BUYS.has(A.newInv)))alerts.push(c.name+" ("+c.id+"): "+o.n+" → "+A.newInv+" at ₹"+full.price);
+    if(o){if(o.n!==A.newInv&&(BUYS.has(o.n)||BUYS.has(A.newInv)))alerts.push(c.name+" ("+c.id+"): "+o.n+" → "+A.newInv+" at ₹"+full.price+tgt);
       if(o.h!==A.holder&&(o.h==="SELL"||A.holder==="SELL"))alerts.push(c.name+" ("+c.id+") for holders: "+o.h+" → "+A.holder+" at ₹"+full.price)}}
   strong.sort((a,b)=>b.mos-a.mos);
   fs.writeFileSync(F("state.json"),JSON.stringify({updated:new Date().toISOString(),mode,signals:sig}));
+  T.updated=px&&px.date||today;fs.writeFileSync(F("targets.json"),JSON.stringify(T));
   const parts=[];if(res.length)parts.push(res.length+" new result"+(res.length>1?"s":"")+": "+res.map(r=>r.id+" "+r.signal).join(", "));
-  if(alerts.length)parts.push(alerts.map(a=>a.replace(/^.*?\(([^()]+)\)/,"$1")).join("; "));
-  console.log(JSON.stringify({mode,today,priceDate:px&&px.date,priceTime:px&&px.time,priceMisses:px&&px.miss||[],checked,failed,nse,newResults:res,alerts,strongBuy:strong.slice(0,10),
+  if(alerts.length)parts.push(alerts.map(a=>a.replace(/^.*?\(([^()]+)\)/,"$1").replace(/; target.*$/,"")).join("; "));
+  const hit=tEvents.filter(e=>e.type==="reached");if(hit.length)parts.push(hit.length+" target"+(hit.length>1?"s":"")+" reached");
+  console.log(JSON.stringify({mode,today,priceDate:px&&px.date,priceTime:px&&px.time,priceMisses:px&&px.miss||[],checked,failed,nse,newResults:res,alerts,targets:{events:tEvents,seeded:seeding,...TG.record(T)},strongBuy:strong.slice(0,10),
     message:parts.length?("Midcap desk: "+parts.join(" | ")).slice(0,195):""}));
 })();

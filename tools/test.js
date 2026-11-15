@@ -56,4 +56,52 @@ t("refreshes an NSE-sourced quarter when the filing is revised", () => {
   const c = co(); N.overlay(c, { 102: fil(102), 103: fil(103) }); N.overlay(c, { 102: fil(102), 103: fil(103, { pat: 77 }) });
   assert.strictEqual(c.quarters.length, 4); assert.strictEqual(c.quarters[3].pat, 77);
 });
+
+/* ---- target prices ---- */
+const TG = require("./targets.js");
+const mkA = o => ({ newInv: "BUY", fv: { base: 800 }, flags: [], blocks: [], quality: 80, latest: { idx: 100, period: "Q1 FY26" }, ...o });
+const C = { id: "AAA", name: "Aaa Ltd." };
+t("sets a target at fair value only for buy-rated companies", () => {
+  const T = {};
+  assert.strictEqual(TG.step(T, C, mkA({ newInv: "WATCHLIST" }), 700, "2026-01-01"), null);
+  const e = TG.step(T, C, mkA(), 700, "2026-01-01");
+  assert.strictEqual(e.type, "set"); assert.strictEqual(T.open.AAA.target, 800); assert.strictEqual(T.open.AAA.setPrice, 700);
+  assert.strictEqual(TG.step(T, C, mkA({ newInv: "WATCHLIST" }), 760, "2026-02-01"), null);   /* stays open after leaving BUY */
+  assert.ok(T.open.AAA);
+});
+t("closes a target as reached, and records it", () => {
+  const T = {}; TG.step(T, C, mkA(), 700, "2026-01-01");
+  const e = TG.step(T, C, mkA({ newInv: "WATCHLIST" }), 805, "2026-07-01");
+  assert.strictEqual(e.type, "reached"); assert.ok(!T.open.AAA); assert.strictEqual(T.closed[0].days, 181); assert.match(e.text, /\+15% in 181 days/);
+  assert.deepStrictEqual(TG.record(T), { open: 0, reached: 1, withdrawn: 0, expired: 0, medianDays: 181 });
+});
+t("withdraws on weak quality or a new red flag, then waits before setting again", () => {
+  let T = {}; TG.step(T, C, mkA(), 700, "2026-01-01");
+  assert.match(TG.step(T, C, mkA({ quality: 50 }), 700, "2026-02-01").text, /withdrawn.*quality score fell to 50/);
+  T = {}; TG.step(T, C, mkA(), 700, "2026-01-01");
+  assert.strictEqual(TG.step(T, C, mkA({ flags: ["Net profit down 30% year on year"] }), 700, "2026-02-01").type, "withdrawn");
+  assert.strictEqual(TG.step(T, C, mkA({ flags: ["x"] }), 700, "2026-02-10"), null);            /* cooldown */
+  assert.strictEqual(TG.step(T, C, mkA({ flags: ["x"] }), 700, "2026-03-15").type, "set");
+});
+t("revises after a new result, withdraws if fair value drops below the price, expires after 3 years", () => {
+  let T = {}; TG.step(T, C, mkA(), 700, "2026-01-01");
+  assert.strictEqual(TG.step(T, C, mkA({ fv: { base: 850 } }), 700, "2026-02-01"), null);        /* no new result: target stays fixed */
+  const e = TG.step(T, C, mkA({ fv: { base: 850 }, latest: { idx: 101, period: "Q2 FY26" } }), 700, "2026-02-01");
+  assert.strictEqual(e.type, "revised"); assert.strictEqual(T.open.AAA.target, 850); assert.strictEqual(T.open.AAA.orig, 800);
+  assert.match(TG.step(T, C, mkA({ fv: { base: 650 }, latest: { idx: 102, period: "Q3 FY26" } }), 700, "2026-05-01").text, /fair value fell to ₹650/);
+  T = {}; TG.step(T, C, mkA(), 700, "2026-01-01");
+  assert.strictEqual(TG.step(T, C, mkA({ blocks: ["No current price on file"] }), null, "2026-02-01"), null);   /* data gap: no decision */
+  assert.strictEqual(TG.step(T, C, mkA(), 700, "2029-01-05").type, "expired");
+});
+t("time estimate uses the lower growth rate, cut and capped, and refuses weak growth", () => {
+  const co = { industry: "Capital Goods" }, A = m => ({ m });
+  let e = E.eta(co, A({ epsTtm: 13.225, eps1: 11.5, eps2: 10 }), 700, 800);                      /* 15% both ways */
+  assert.strictEqual(e.fast.toFixed(1), "15.0"); assert.strictEqual(e.slow.toFixed(2), "11.25"); assert.strictEqual(e.lo, 11); assert.strictEqual(e.hi, 15);
+  e = E.eta(co, A({ epsTtm: 20, eps1: 10, eps2: 5 }), 700, 800); assert.strictEqual(e.fast, 30); assert.strictEqual(e.slow, 20);   /* caps */
+  assert.match(E.eta(co, A({ epsTtm: 10, eps1: 10.5, eps2: 9 }), 700, 800).none, /not growing/);
+  assert.match(E.eta(co, A({ epsTtm: 10.6, eps1: 10, eps2: null }), 700, 800).none, /too slowly/);
+  assert.match(E.eta(co, A({ epsTtm: 11.5, eps1: 10, eps2: null }), 700, 2000).none, /more than 3 years/);
+  assert.strictEqual(E.eta({ industry: "Metals & Mining" }, A({ epsTtm: 12, eps1: 10 }), 700, 800).cyclical, true);
+  assert.strictEqual(E.eta(co, A({ epsTtm: 12, eps1: 10 }), 810, 800).reached, true);
+});
 console.log(n + " tests passed");

@@ -18,7 +18,8 @@ if (r.stderr) process.stderr.write(r.stderr);
 if (r.status !== 0) die("updater exited with status " + r.status);
 let s; try { s = JSON.parse(r.stdout.trim().split("\n").pop()) } catch (e) { die("updater printed no summary") }
 
-if (mode === "prices") {
+if (mode === "recompute") { /* test mode: no sanity limits */ }
+else if (mode === "prices") {
   if (s.priceMisses.length > 30) die("no live price for " + s.priceMisses.length + " companies");
 } else {
   let n = 0; try { n = JSON.parse(fs.readFileSync(path.join(dir, "data.json"), "utf8")).companies.length } catch (e) {}
@@ -36,10 +37,12 @@ for (const x of s.newResults) {
   L.push("");
 }
 if (s.alerts.length) L.push("**Signal changes**", ...s.alerts.map(a => "- " + a), "");
+const TE = (s.targets && s.targets.events) || [], tNotify = TE.filter(e => e.type !== "revised");
+if (TE.length) L.push("**Targets**", ...TE.map(e => "- " + e.text), "");
 if (s.strongBuy.length) L.push("**Strong buy list**", ...s.strongBuy.map(x => "- " + x.name + " ₹" + x.price + ", " + x.mos + "% below fair value"), "");
 if (site) L.push("Dashboard: " + site);
 L.push("Rule-based research signal, not investment advice.");
-const body = L.join("\n"), notify = s.newResults.length > 0 || s.alerts.length > 0;
+const body = L.join("\n"), notify = s.newResults.length > 0 || s.alerts.length > 0 || tNotify.length > 0;
 
 /* run log, for the Actions page only */
 const log = ["Mode: " + mode + " · prices: " + (s.priceDate || "none") + " " + (s.priceTime || "") + (s.checked.length ? " · Screener checked " + s.checked.length + ", failed " + s.failed.length : "")];
@@ -49,6 +52,7 @@ if (s.nse) {
   if (s.nse.held.length) log.push("New results waiting for Screener: " + s.nse.held.join("; "));
   if (s.nse.differs.length) log.push("NSE and Screener differ: " + s.nse.differs.join("; "));
 }
+if (s.targets) log.push("Targets: " + s.targets.open + " open, " + s.targets.reached + " reached, " + s.targets.withdrawn + " withdrawn, " + s.targets.expired + " expired" + (s.targets.seeded ? " (first run: targets set for all current buy-rated companies)" : ""));
 console.log(log.join("\n") + "\n\n" + body);
 summary(log.map(x => "- " + x).join("\n") + "\n\n" + body);
 
@@ -63,6 +67,7 @@ summary(log.map(x => "- " + x).join("\n") + "\n\n" + body);
     const W = [title.replace(/^Midcap desk: /, "Midcap desk\n"), ""];
     for (const x of s.newResults) W.push("*" + x.name + "* " + x.quarter + ": " + x.verdict + "\nNew investors " + x.signal + " · Holders " + x.holder + (x.flags && x.flags.length ? "\nRed flags: " + x.flags.join("; ") : ""), "");
     if (s.alerts.length) W.push("Signal changes:", ...s.alerts.map(a => "• " + a), "");
+    if (TE.length) W.push("Targets:", ...TE.map(e => "• " + e.text), "");
     if (s.strongBuy.length) W.push("Strong buys: " + s.strongBuy.slice(0, 5).map(x => x.name.replace(/ Ltd\.?$| Limited$/, "") + " (" + x.mos + "% below FV)").join(", "), "");
     if (site) W.push(site);
     W.push("Rule-based signal, not investment advice.");
