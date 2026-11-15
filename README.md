@@ -20,7 +20,7 @@ Rule-based fundamental research signals for the Nifty Midcap 150. A static dashb
 
 - Price check: weekdays 11:22 and 15:22 (live prices from Yahoo Finance).
 - NSE filings check: daily 17:10 and 19:10. Reads new results straight from NSE.
-- Evening research: daily 21:39. Reloads Screener for companies near their result date (all 150 on Sundays), then checks NSE filings.
+- Evening research: daily 21:39 IST. Reloads Screener for companies near their result date (all 150 on Sundays), then checks NSE filings.
 
 GitHub can start scheduled runs 5 to 30 minutes late. To run by hand: Actions → Midcap desk update → Run workflow.
 
