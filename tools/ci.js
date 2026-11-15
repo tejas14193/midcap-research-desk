@@ -5,7 +5,8 @@
    Alerts go out when there is a new result or a signal moves into or out of BUY, STRONG BUY or SELL:
    - email, when SMTP_USER and SMTP_PASS are set (Gmail app password; sent to SMTP_TO or to SMTP_USER itself)
    - a GitHub issue, when GITHUB_TOKEN and GITHUB_REPOSITORY are set
-   - Telegram, when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set */
+   - Telegram, when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set
+   - WhatsApp (CallMeBot), when WHATSAPP_RECIPIENTS is set: a short version of the alert to each number */
 "use strict";
 const { spawnSync } = require("child_process"), fs = require("fs"), path = require("path");
 const mode = process.argv[2], dir = path.resolve(process.argv[3] || ".");
@@ -57,6 +58,16 @@ summary(log.map(x => "- " + x).join("\n") + "\n\n" + body);
   if (E.SMTP_USER && E.SMTP_PASS) {
     try { await require("./mail.js").send({ subject: title, text: plain }); console.log("Email: sent") }
     catch (e) { console.error("Email failed: " + e.message); summary("**Email failed:** " + e.message) }
+  }
+  if (E.WHATSAPP_RECIPIENTS) {
+    const W = [title.replace(/^Midcap desk: /, "Midcap desk\n"), ""];
+    for (const x of s.newResults) W.push("*" + x.name + "* " + x.quarter + ": " + x.verdict + "\nNew investors " + x.signal + " · Holders " + x.holder + (x.flags && x.flags.length ? "\nRed flags: " + x.flags.join("; ") : ""), "");
+    if (s.alerts.length) W.push("Signal changes:", ...s.alerts.map(a => "• " + a), "");
+    if (s.strongBuy.length) W.push("Strong buys: " + s.strongBuy.slice(0, 5).map(x => x.name.replace(/ Ltd\.?$| Limited$/, "") + " (" + x.mos + "% below FV)").join(", "), "");
+    if (site) W.push(site);
+    W.push("Rule-based signal, not investment advice.");
+    try { for (const l of await require("./whatsapp.js").sendAll(W.join("\n"))) { console.log(l); if (/failed/.test(l)) summary("**" + l + "**") } }
+    catch (e) { console.error("WhatsApp failed: " + e.message) }
   }
   if (E.GITHUB_TOKEN && E.GITHUB_REPOSITORY) {
     try {

@@ -12,7 +12,7 @@ on:
         description: "What to run"
         type: choice
         default: research
-        options: [prices, filings, research, full, deploy-only, test-email]
+        options: [prices, filings, research, full, deploy-only, test-email, test-whatsapp]
   push:
     paths: [index.html, engine.js, data.json, prices.json]
 
@@ -64,18 +64,25 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
         run: node tools/mail.js
 
+      - name: Send a test WhatsApp message
+        if: steps.mode.outputs.mode == 'test-whatsapp'
+        env:
+          WHATSAPP_RECIPIENTS: ${{ secrets.WHATSAPP_RECIPIENTS }}
+        run: node tools/whatsapp.js
+
       - name: Update data and send alerts
-        if: steps.mode.outputs.mode != 'deploy-only' && steps.mode.outputs.mode != 'test-email'
+        if: steps.mode.outputs.mode != 'deploy-only' && !startsWith(steps.mode.outputs.mode, 'test-')
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WHATSAPP_RECIPIENTS: ${{ secrets.WHATSAPP_RECIPIENTS }}
         run: node tools/ci.js "${{ steps.mode.outputs.mode }}" .
 
       - name: Save data to the repository
-        if: steps.mode.outputs.mode != 'deploy-only' && steps.mode.outputs.mode != 'test-email'
+        if: steps.mode.outputs.mode != 'deploy-only' && !startsWith(steps.mode.outputs.mode, 'test-')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -87,14 +94,14 @@ jobs:
           git push
 
       - name: Build site folder
-        if: steps.mode.outputs.mode != 'test-email'
+        if: "!startsWith(steps.mode.outputs.mode, 'test-')"
         run: mkdir _site && cp index.html engine.js data.json prices.json _site/
       - uses: actions/configure-pages@v5
-        if: steps.mode.outputs.mode != 'test-email'
+        if: "!startsWith(steps.mode.outputs.mode, 'test-')"
       - uses: actions/upload-pages-artifact@v3
-        if: steps.mode.outputs.mode != 'test-email'
+        if: "!startsWith(steps.mode.outputs.mode, 'test-')"
         with:
           path: _site
       - id: deploy
-        if: steps.mode.outputs.mode != 'test-email'
+        if: "!startsWith(steps.mode.outputs.mode, 'test-')"
         uses: actions/deploy-pages@v4
