@@ -1,0 +1,12 @@
+name = "midcap-desk-timer"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+# Cloudflare cron times are UTC. India is UTC+5:30.
+[triggers]
+crons = [
+  "52 5,9 * * MON-FRI",  # price check, weekdays 11:22 and 15:22 IST
+  "40 11,13 * * *",      # NSE filings check, daily 17:10 and 19:10 IST
+  "9 16 * * *",          # evening research, daily 21:39 IST
+]
