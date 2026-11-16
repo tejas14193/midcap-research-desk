@@ -8,6 +8,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const HEAD = { "User-Agent": UA, Accept: "*/*", "Accept-Language": "en-US,en;q=0.9", Referer: "https://www.nseindia.com/companies-listing/corporate-integrated-filing" };
 const API = "https://www.nseindia.com/api/integrated-filing-results?index=equities&period_ended=all&type=Integrated%20Filing-%20Financials";
 const FORMAT = "INTEGRATED_FILING_INDAS_";
+const PARSER = 2;  /* bump when parse() output changes, so cached filings are read again */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const MON = { JAN: "Jan", FEB: "Feb", MAR: "Mar", APR: "Apr", MAY: "May", JUN: "Jun", JUL: "Jul", AUG: "Aug", SEP: "Sep", OCT: "Oct", NOV: "Nov", DEC: "Dec" };
 const MNUM = { Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06", Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12" };
@@ -54,18 +55,27 @@ function pick(rows, wanted /* Map symbol -> "consolidated"|"standalone" */) {
 /* Parse one XBRL file. Returns the quarter's figures in ₹ crore, or throws an Error saying what is wrong. */
 function parse(xml, want /* { symbol, end, basis } */) {
   if (!xml || xml.indexOf("<xbrli:context") < 0) throw new Error("not an XBRL file");
-  let D = null, I = null;
+  let D = null, I = null, Dstart = null; const dims = [];
   for (const m of xml.matchAll(/<xbrli:context id="([^"]+)">([\s\S]*?)<\/xbrli:context>/g)) {
-    if (m[2].includes("xbrldi:")) continue;                      /* segment or other breakdown, not the company total */
     const s = /<xbrli:startDate>([^<]+)</.exec(m[2]), e = /<xbrli:endDate>([^<]+)</.exec(m[2]), i = /<xbrli:instant>([^<]+)</.exec(m[2]);
-    if (s && e && e[1].trim() === want.end) { const d = (new Date(e[1]) - new Date(s[1])) / 864e5; if (d >= 80 && d <= 100 && !D) D = m[1] }
+    if (m[2].includes("xbrldi:")) { if (s && e) dims.push([m[1], s[1].trim(), e[1].trim()]); continue }  /* breakdown lines, not the company total */
+    if (s && e && e[1].trim() === want.end) { const d = (new Date(e[1]) - new Date(s[1])) / 864e5; if (d >= 80 && d <= 100 && !D) { D = m[1]; Dstart = s[1].trim() } }
     if (i && i[1].trim() === want.end && !I) I = m[1];
   }
   if (!D) throw new Error("no three-month period ending " + want.end);
+  const B = new Set(dims.filter(([, s, e]) => s === Dstart && e === want.end).map(([id]) => id));  /* breakdowns of the same quarter */
   const F = {};
   for (const m of xml.matchAll(/<[a-z0-9-]+:(\w+)\s+([^>]*?)>([^<]*)<\//g)) {
-    const c = /contextRef="([^"]+)"/.exec(m[2]); if (!c || (c[1] !== D && c[1] !== I)) continue;
+    const c = /contextRef="([^"]+)"/.exec(m[2]); if (!c || (c[1] !== D && c[1] !== I && !B.has(c[1]))) continue;
     const k = c[1] + "|" + m[1]; if (!(k in F)) F[k] = m[3].trim();
+  }
+  /* "Other expenses" breakdown: excise duty and finance income are reported inside it by some companies */
+  let excise = 0, finInc = 0;
+  for (const b of B) {
+    const d = (F[b + "|DescriptionOfOtherExpenses"] || "").toLowerCase(), v = Number(F[b + "|OtherExpenses"]);
+    if (!d || !isFinite(v)) continue;
+    if (/excise/.test(d)) excise += v / 1e7;
+    else if (/finance income|interest income/.test(d) && v < 0) finInc += -v / 1e7;
   }
   const txt = (c, n) => F[c + "|" + n], raw = (c, n) => { const v = c && txt(c, n); if (v == null || v === "") return null; const x = Number(v); return isFinite(x) ? x : null };
   const cr = (c, n) => { const v = raw(c, n); return v == null ? null : v / 1e7 }, r0 = v => v == null ? null : Math.round(v);
@@ -77,8 +87,13 @@ function parse(xml, want /* { symbol, end, basis } */) {
   if (pat == null || exp == null) throw new Error("no profit or expenses figure");
   if (revenue > 5e5) throw new Error("revenue of ₹" + Math.round(revenue) + " cr is implausible (unit error?)");
   const sum = (a, b) => a == null && b == null ? null : (a || 0) + (b || 0);
+  const jv = cr(D, "ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod");
   return {
-    revenue: r0(revenue), ebitda: r0(revenue - (exp - (fin || 0) - (dep || 0))), pat: r0(pat), interest: r0(fin),
+    /* revenue net of excise duty (as Screener and most analysts show it); operating profit excludes finance income;
+       interest is net of finance income (as Screener shows it), with the gross figure kept */
+    revenue: r0(revenue - excise), revenueGross: r0(revenue), excise: r0(excise),
+    ebitda: r0(revenue - (exp - (fin || 0) - (dep || 0)) - finInc), pat: r0(pat),
+    interest: r0(fin == null ? null : fin - finInc), interestGross: r0(fin), finIncome: r0(finInc), jv: r0(jv), pv: PARSER,
     eps: raw(D, "BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations"),
     debt: r0(sum(cr(I, "BorrowingsNoncurrent"), cr(I, "BorrowingsCurrent"))),
     cash: r0(sum(cr(I, "CashAndCashEquivalents"), cr(I, "BankBalanceOtherThanCashAndCashEquivalents"))),
@@ -96,26 +111,51 @@ function parse(xml, want /* { symbol, end, basis } */) {
    Returns { added: quarter|null, held: reason|null }. */
 const FIELDS = [["revenue", "Revenue"], ["ebitda", "Operating profit"], ["pat", "Net profit"], ["interest", "Interest"]];
 const TAKE = ["revenue", "ebitda", "pat", "eps", "interest"];
+/* Screener and the filings can define a line differently without either being wrong. Accepted alternatives:
+   revenue before or after excise duty; operating profit with or without the share of JV/associate results
+   (Screener deducts it for some companies, e.g. UPL, Voltas). The convention that matched is remembered so a
+   quarter added from NSE follows the same one as the Screener history. */
+const ALT = { revenue: f => [["net", f.revenue], ["gross", f.revenueGross]], ebitda: f => [["standard", f.ebitda], ["with JV share", f.jv ? f.ebitda + f.jv : null]] };
+const close = (a, b) => Math.abs(a - b) <= Math.max(2, Math.abs(b) * 0.02);
+function compare(f, q) {
+  const check = [], note = [], conv = {};
+  for (const [k, l] of FIELDS) {
+    if (q[k] == null) continue;
+    const opts = (ALT[k] ? ALT[k](f) : [["standard", f[k]]]).filter(o => o[1] != null); if (!opts.length) continue;
+    const hit = opts.find(o => close(o[1], q[k]));
+    if (hit) { conv[k] = hit[0]; if (hit !== opts[0]) note.push(l + " matches Screener " + hit[0]); }
+    else check.push(l + ": NSE filing ₹" + opts[0][1] + " cr, Screener ₹" + q[k] + " cr");
+  }
+  if (f.excise > 0) note.push("Revenue shown after excise duty of ₹" + f.excise + " cr");
+  return { check, note, conv };
+}
+function adopt(f, conv) {
+  const v = { ...f };
+  if (conv.revenue === "gross" && f.revenueGross != null) v.revenue = f.revenueGross;
+  if (conv.ebitda === "with JV share" && f.jv) v.ebitda = f.ebitda + f.jv;
+  return v;
+}
 function overlay(co, filings) {
   const out = { added: null, held: null }; if (!filings) return out;
   const by = {}; co.quarters.forEach(q => by[q.idx] = q);
-  let verified = null;
+  let verified = null, conv = {};
   for (const f of Object.values(filings).sort((a, b) => a.idx - b.idx)) {
     if (f.basis !== co.basis) continue;
     const url = f.ixbrl || f.xbrl, q = by[f.idx], last = co.quarters.length ? Math.max(...co.quarters.map(x => x.idx)) : null;
     if (q && q.src === "NSE") {                                   /* added from NSE earlier, Screener has not caught up: refresh in case of a revision */
-      for (const k of TAKE) q[k] = f[k];
+      const v = adopt(f, conv); for (const k of TAKE) q[k] = v[k];
       q.filing = url; q.filed = f.filed;
     } else if (q) {
       q.filing = url; q.filed = f.filed;
-      q.check = FIELDS.filter(([k]) => f[k] != null && q[k] != null && Math.abs(f[k] - q[k]) > Math.max(2, Math.abs(q[k]) * 0.02))
-        .map(([k, l]) => l + ": NSE filing ₹" + f[k] + " cr, Screener ₹" + q[k] + " cr");
-      verified = q.check.length === 0;
+      const m = compare(f, q);
+      q.check = m.check; q.basisNote = m.note.length ? m.note : undefined;
+      verified = q.check.length === 0; conv = m.conv;
     } else if (last != null && f.idx === last + 1) {
       const p = by[last];
       if (verified !== true) { out.held = verified === false ? "its previous filing did not match Screener" : "no earlier filing has been checked against Screener"; continue }
-      if (p && p.revenue > 0 && (f.revenue / p.revenue > 3 || f.revenue / p.revenue < 0.33)) { out.held = "revenue is far from the previous quarter"; continue }
-      const n = { period: E.plabel(f.idx), idx: f.idx, revenue: f.revenue, ebitda: f.ebitda, pat: f.pat, eps: f.eps, interest: f.interest,
+      const v = adopt(f, conv);
+      if (p && p.revenue > 0 && (v.revenue / p.revenue > 3 || v.revenue / p.revenue < 0.33)) { out.held = "revenue is far from the previous quarter"; continue }
+      const n = { period: E.plabel(f.idx), idx: f.idx, revenue: v.revenue, ebitda: v.ebitda, pat: f.pat, eps: f.eps, interest: f.interest,
         debt: null, cash: null, equity: null, pledge: null, gnpa: null, src: "NSE", filing: url, filed: f.filed };
       co.quarters.push(n); by[f.idx] = n; if (co.quarters.length > 13) co.quarters = co.quarters.slice(-13);
       if (f.filed) co.resultDate = f.filed; out.added = n;
@@ -124,4 +164,4 @@ function overlay(co, filings) {
   return out;
 }
 
-module.exports = { recent, forSymbol, pick, parse, overlay, get, quarterOf, isoDate, sleep, FORMAT };
+module.exports = { PARSER, compare, recent, forSymbol, pick, parse, overlay, get, quarterOf, isoDate, sleep, FORMAT };

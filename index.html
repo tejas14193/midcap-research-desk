@@ -148,8 +148,8 @@ function chart(A){
 const link=(u,t)=>/^https:\/\//.test(u||"")?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+t+"</a>":t;
 function srcNote(q){
   if(q.src==="NSE")return '<p class="note">These figures were read directly from the '+link(q.filing,"company’s NSE filing")+" of "+dt(q.filed)+". Screener has not loaded this quarter yet, so debt, cash and net worth still come from the last balance sheet on file.</p>";
-  if(q.check&&q.check.length)return '<p class="note">Screener’s figures are used here, but they differ from the '+link(q.filing,"company’s NSE filing")+": "+q.check.map(esc).join("; ")+". A common cause is a different treatment of excise duty or one-off items.</p>";
-  if(q.filing)return '<p class="sub">Checked against the '+link(q.filing,"company’s NSE filing")+" of "+dt(q.filed)+": revenue, operating profit, net profit and interest agree within 2%.</p>";
+  if(q.check&&q.check.length)return '<p class="note">Screener’s figures are used here, but they differ from the '+link(q.filing,"company’s NSE filing")+": "+q.check.map(esc).join("; ")+". This can also be an error in the filing’s data file, so check the signed results.</p>";
+  if(q.filing)return '<p class="sub">Checked against the '+link(q.filing,"company’s NSE filing")+" of "+dt(q.filed)+": revenue, operating profit, net profit and interest agree within 2%"+(q.basisNote&&q.basisNote.length?" ("+q.basisNote.map(esc).join("; ")+")":"")+".</p>";
   return ""}
 function vCompany(){
   const c=DATA.companies.find(x=>x.id===sel);if(!c)return vHome();

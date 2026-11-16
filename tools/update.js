@@ -135,6 +135,9 @@ const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){re
         await Promise.all([w(),w()]);
       }
       const picks=N.pick(rows,want).filter(f=>f.idx>=ended-1&&f.idx<=ended&&!cache._failed[f.seq]&&!(cache[f.symbol]&&cache[f.symbol][f.idx]&&cache[f.symbol][f.idx].seq>=f.seq));
+      /* filings read by an older version of the reader are read again (same file, new fields) */
+      const inPicks=new Set(picks.map(f=>f.symbol+"|"+f.idx));
+      for(const s in cache)if(s!=="_failed")for(const i in cache[s]){const f=cache[s][i];if(f.pv!==N.PARSER&&f.xbrl&&!inPicks.has(s+"|"+i))picks.push(f)}
       async function r(){while(picks.length){const f=picks.shift();
         try{const xml=await N.get(f.xbrl);if(!xml){nse.failed.push(f.symbol+" "+E.plabel(f.idx)+": file could not be downloaded");continue}
           const v=N.parse(xml,f);(cache[f.symbol]=cache[f.symbol]||{})[f.idx]={...f,...v};nse.read++}

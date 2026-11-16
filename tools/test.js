@@ -14,7 +14,36 @@ t("quarter and date helpers", () => {
 });
 t("reads Ashok Leyland Q2 FY27 consolidated filing", () => {
   const v = N.parse(fx("ashokley-q2fy27-consolidated.xml"), { symbol: "ASHOKLEY", end: "2026-09-30", basis: "consolidated" });
-  assert.deepStrictEqual(v, { revenue: 17030, ebitda: 2776, pat: 891, interest: 1344, eps: 1.43, debt: 63790, cash: 7134, equity: 13201 });
+  assert.deepStrictEqual(v, { revenue: 17030, revenueGross: 17030, excise: 0, ebitda: 2776, pat: 891, interest: 1344, interestGross: 1344, finIncome: 0, jv: 29,
+    pv: N.PARSER, eps: 1.43, debt: 63790, cash: 7134, equity: 13201 });
+});
+const rd = (f, s) => N.parse(fx(f), { symbol: s, end: "2026-09-30", basis: "consolidated" });
+const co = () => ({ basis: "consolidated", resultDate: "2026-08-01", quarters: [100, 101, 102].map(i => ({ idx: i, period: E.plabel(i), revenue: 1000, ebitda: 200, pat: 100, interest: 10, eps: 5, debt: 50, cash: 20, equity: 900 })) });
+const fil = (idx, o) => ({ idx, basis: "consolidated", revenue: 1000, ebitda: 200, pat: 100, interest: 10, eps: 5, debt: 1, cash: 1, equity: 1, xbrl: "https://x/f.xml", filed: "2026-11-10", ...o });
+t("takes excise duty out of revenue (Godfrey Phillips Q2 FY27 matches Screener)", () => {
+  const v = rd("godfryphlp-q2fy27-consolidated.xml", "GODFRYPHLP");
+  assert.strictEqual(v.revenueGross, 4198); assert.strictEqual(v.excise, 2856); assert.strictEqual(v.revenue, 1342); assert.strictEqual(v.ebitda, 213);
+  assert.deepStrictEqual(N.compare(v, { revenue: 1342, ebitda: 213, pat: 190, interest: 4 }).check, []);
+  assert.deepStrictEqual(N.compare(v, { revenue: 4198, ebitda: 213, pat: 190, interest: 4 }).conv.revenue, "gross");  /* a source that keeps gross revenue still matches */
+});
+t("keeps finance income out of operating profit (Indus Towers Q2 FY27 matches Screener)", () => {
+  const v = rd("industower-q2fy27-consolidated.xml", "INDUSTOWER");
+  assert.strictEqual(v.finIncome, 113); assert.strictEqual(v.ebitda, 4590); assert.strictEqual(v.interest, 342); assert.strictEqual(v.interestGross, 455);
+  assert.deepStrictEqual(N.compare(v, { revenue: 8516, ebitda: 4590, pat: 1793, interest: 342 }).check, []);
+});
+t("accepts operating profit after JV share, and a new NSE quarter follows it (Voltas Q2 FY27)", () => {
+  const v = rd("voltas-q2fy27-consolidated.xml", "VOLTAS");
+  assert.strictEqual(v.ebitda, 128); assert.strictEqual(v.jv, -41);
+  const m = N.compare(v, { revenue: 2707, ebitda: 87, pat: 48, interest: 20 });
+  assert.deepStrictEqual(m.check, []); assert.strictEqual(m.conv.ebitda, "with JV share");
+  const c = co(); c.quarters[2].ebitda = 160;
+  const r = N.overlay(c, { 102: fil(102, { ebitda: 200, jv: -40 }), 103: fil(103, { ebitda: 250, jv: -30 }) });
+  assert.ok(r.added); assert.strictEqual(c.quarters[3].ebitda, 220);
+});
+t("still flags a real filing error (Glenmark Q2 FY27 data file leaves out other operating income)", () => {
+  const v = rd("glenmark-q2fy27-consolidated.xml", "GLENMARK");
+  const m = N.compare(v, { revenue: 4247, ebitda: 864, pat: 264, interest: 64 });
+  assert.strictEqual(m.check.length, 2); assert.match(m.check[0], /Revenue: NSE filing ₹4157 cr, Screener ₹4247 cr/);
 });
 t("rejects a filing for another company, basis or quarter", () => {
   const x = fx("ashokley-q2fy27-consolidated.xml");
@@ -33,8 +62,6 @@ t("picks the newest filing of the right format and basis", () => {
     row({ xbrl: "https://x/INTEGRATED_FILING_NBFC_INDAS_2_WEB.xml", seq_Id: "8" }), row({ symbol: "ZZZ", seq_Id: "7" })], new Map([["AAA", "consolidated"]]));
   assert.strictEqual(got.length, 1); assert.strictEqual(got[0].seq, 5); assert.strictEqual(got[0].revised, true); assert.strictEqual(got[0].filed, "2026-11-01");
 });
-const co = () => ({ basis: "consolidated", resultDate: "2026-08-01", quarters: [100, 101, 102].map(i => ({ idx: i, period: E.plabel(i), revenue: 1000, ebitda: 200, pat: 100, interest: 10, eps: 5, debt: 50, cash: 20, equity: 900 })) });
-const fil = (idx, o) => ({ idx, basis: "consolidated", revenue: 1000, ebitda: 200, pat: 100, interest: 10, eps: 5, debt: 1, cash: 1, equity: 1, xbrl: "https://x/f.xml", filed: "2026-11-10", ...o });
 t("adds the next quarter from NSE when the previous filing matched Screener", () => {
   const c = co(), r = N.overlay(c, { 102: fil(102), 103: fil(103, { revenue: 1100, pat: 120 }) });
   assert.ok(r.added); assert.strictEqual(c.quarters.length, 4);
