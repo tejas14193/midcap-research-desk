@@ -5,8 +5,7 @@ workers_dev = true
 
 # Cloudflare cron times are UTC. India is UTC+5:30.
 [triggers]
-crons = [
-  "52 5,9 * * MON-FRI",  # price check, weekdays 11:22 and 15:22 IST
-  "40 11,13 * * *",      # NSE filings check, daily 17:10 and 19:10 IST
-  "9 16 * * *",          # evening research, daily 21:39 IST
-]
+# One trigger only: the free plan allows 5 per account, shared with other Workers.
+# Fires at :09, :40 and :52 past 05, 09, 11, 13 and 16 UTC (15 times a day);
+# the Worker starts a run only at 11:22 and 15:22 IST (weekdays), 17:10, 19:10 and 21:39 IST.
+crons = ["9,40,52 5,9,11,13,16 * * *"]

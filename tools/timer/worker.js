@@ -3,7 +3,8 @@
 // Secret needed: GH_TOKEN (fine-grained token, Actions read and write, this repo only).
 const REPO = "tejas14193/midcap-research-desk";
 
-// Mode is worked out from the India time of the trigger, not from the cron text.
+// One cron trigger fires 15 times a day; the mode is worked out from the India time
+// of each firing, and firings at other times start nothing.
 export function pickMode(ms) {
   const d = new Date(ms + 5.5 * 3600 * 1000); // shift to IST, then read as UTC
   const hm = d.getUTCHours() * 100 + d.getUTCMinutes();
