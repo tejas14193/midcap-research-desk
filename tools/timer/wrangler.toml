@@ -2,6 +2,9 @@ name = "midcap-desk-timer"
 main = "worker.js"
 compatibility_date = "2026-11-01"
 workers_dev = true
+preview_urls = false
+# Keep variables set in the Cloudflare dashboard (GH_TOKEN) when deploying from GitHub.
+keep_vars = true
 
 # Cloudflare cron times are UTC. India is UTC+5:30.
 [triggers]
