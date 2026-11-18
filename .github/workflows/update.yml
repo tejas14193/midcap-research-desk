@@ -1,11 +1,9 @@
 name: Midcap desk update
 
-# Times are UTC. India is UTC+5:30. GitHub may start scheduled runs 5 to 30 minutes late.
+# No GitHub schedule (removed 18 Nov 2026 at the user's request: it fired hours late and doubled runs).
+# Runs are started by the Cloudflare Worker timer in tools/timer (workflow_dispatch):
+# price check weekdays 11:22 and 15:22 IST, NSE filings daily 17:10 and 19:10 IST, research daily 21:39 IST.
 on:
-  schedule:
-    - cron: "52 5,9 * * 1-5"   # price check, weekdays 11:22 and 15:22 IST
-    - cron: "40 11,13 * * *"   # NSE filings check, daily 17:10 and 19:10 IST
-    - cron: "9 16 * * *"       # evening research, daily 21:39 IST (Screener + NSE; full reload on Sundays)
   workflow_dispatch:
     inputs:
       mode:
