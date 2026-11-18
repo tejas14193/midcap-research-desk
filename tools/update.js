@@ -157,7 +157,7 @@ const readJ=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){re
   let px;
   if(offline)px=oldPx;
   else if(mode==="prices")px=await livePrices(bundle.companies,oldPx);
-  else{const b=await prices();px=b?{date:b.date,time:"close",src:"NSE end-of-day file",p:{}}:oldPx;if(b)bundle.companies.forEach(c=>{if(b.p[c.id]>0)px.p[c.id]=b.p[c.id]})}
+  else px=require("./px.js").pickPrices(await prices(),oldPx,bundle.companies.map(c=>c.id));
   if(px)fs.writeFileSync(F("prices.json"),JSON.stringify(px));
   /* signals for everyone, compared with the last run */
   const sig={},alerts=[],strong=[],res=[],BUYS=new Set(["STRONG BUY","BUY"]);

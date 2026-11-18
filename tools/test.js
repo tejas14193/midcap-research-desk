@@ -88,6 +88,16 @@ t("refreshes an NSE-sourced quarter when the filing is revised", () => {
 const TG = require("./targets.js");
 const mkA = o => ({ newInv: "BUY", fv: { base: 800 }, flags: [], blocks: [], quality: 80, latest: { idx: 100, period: "Q1 FY26" }, ...o });
 const C = { id: "AAA", name: "Aaa Ltd." };
+const PX = require("./px.js");
+t("a filings run never replaces today's live prices with yesterday's close (18 Nov 2026 flip-flop)", () => {
+  const live = { date: "2026-11-18", time: "15:23 IST", p: { KEI: 3720, HFCL: 196 } };
+  assert.strictEqual(PX.pickPrices({ date: "2026-11-17", p: { KEI: 3851, HFCL: 188.19 } }, live, ["KEI", "HFCL"]), live);
+  const c = PX.pickPrices({ date: "2026-11-18", p: { KEI: 3725 } }, live, ["KEI", "HFCL"]);
+  assert.deepStrictEqual(c, { date: "2026-11-18", time: "close", src: "NSE end-of-day file", p: { KEI: 3725, HFCL: 196 } });
+  const n = PX.pickPrices({ date: "2026-11-18", p: { KEI: 3725 } }, { date: "2026-11-17", time: "close", p: { HFCL: 188 } }, ["KEI", "HFCL"]);
+  assert.deepStrictEqual(n.p, { KEI: 3725 });   /* a price from an older day is not carried into today's close */
+  assert.strictEqual(PX.pickPrices(null, live, ["KEI"]), live);
+});
 t("sets a target at fair value only for buy-rated companies", () => {
   const T = {};
   assert.strictEqual(TG.step(T, C, mkA({ newInv: "WATCHLIST" }), 700, "2026-01-01"), null);
